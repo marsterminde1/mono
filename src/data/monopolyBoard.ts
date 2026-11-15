@@ -556,6 +556,7 @@ export const AVAILABLE_TOKENS = ['🎩', '🚗', '🚢', '🐕', '👢', '🐱',
 
 export const MAX_PLAYERS = 20;
 export const TURN_LIMIT_OPTIONS = [0, 15, 25, 45, 60, 90] as const;
+export const ROUND_LIMIT_OPTIONS = [0, 10, 15, 20] as const;
 
 export const PLAYER_COLORS = [
   '#ef4444', // Red

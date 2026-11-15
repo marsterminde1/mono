@@ -372,7 +372,7 @@ export default function App() {
     }));
   };
 
-  const handleUpdateSettings = (settings: { maxPlayers: number; turnSeconds: number; boardSize?: number; propertyBuildMode?: 'classic' | 'quick'; propertyUpgradeMode?: 'standard' | 'landmark'; botDifficulty?: 'easy' | 'balanced' | 'strategic' }) => {
+  const handleUpdateSettings = (settings: { maxPlayers: number; turnSeconds: number; boardSize?: number; propertyBuildMode?: 'classic' | 'quick'; propertyUpgradeMode?: 'standard' | 'landmark'; roundLimit?: number; comebackMode?: 'off' | 'fair'; botDifficulty?: 'easy' | 'balanced' | 'strategic' }) => {
     if (!socket || !lobbyData) return;
     socket.emit('lobby:settings', { roomId: lobbyData.roomId, ...settings }, (res: any) => { if (!res.success) triggerError(res.error || 'Einstellung fehlgeschlagen'); });
   };

@@ -24,6 +24,7 @@ export type PropertyColor =
 
 export type PropertyBuildMode = 'classic' | 'quick';
 export type PropertyUpgradeMode = 'standard' | 'landmark';
+export type ComebackMode = 'off' | 'fair';
 export const BOT_DIFFICULTIES = ['easy', 'balanced', 'strategic'] as const;
 export type BotDifficulty = typeof BOT_DIFFICULTIES[number];
 export const isBotDifficulty = (value: unknown): value is BotDifficulty =>
@@ -165,6 +166,8 @@ export interface GameState {
   boardSize?: number;
   propertyBuildMode?: PropertyBuildMode;
   propertyUpgradeMode?: PropertyUpgradeMode;
+  roundLimit?: number;
+  comebackMode?: ComebackMode;
   rollsTaken?: number;
   bonusRoll?: boolean;
   /** Seconds per human action before auto-play; 0 disables the limit. */
@@ -184,6 +187,7 @@ export interface GameState {
   pendingTrades?: TradeOffer[];
   auction?: PropertyAuction | null;
   roundNumber?: number;
+  comebackRewardsAwarded?: Record<string, number>;
   roundStartPlayerId?: string | null;
   cityEventVote?: CityEventVote | null;
   activeCityEvent?: ActiveCityEvent | null;
@@ -210,5 +214,7 @@ export interface LobbySettings {
   turnSeconds: number;
   propertyBuildMode?: PropertyBuildMode;
   propertyUpgradeMode?: PropertyUpgradeMode;
+  roundLimit?: number;
+  comebackMode?: ComebackMode;
   botDifficulty?: BotDifficulty;
 }

@@ -315,6 +315,79 @@ test('winning city event applies at the round boundary and opens the next vote',
   assert.equal(state.cityEventVote?.forRound, 3);
 });
 
+test('round limit ends at the completed round and selects the richest player without applying another event', () => {
+  const engine = new GameEngine('ROUND_LIMIT', [player('a'), player('b')], { roundLimit: 10 });
+  const state = engine.getState();
+  state.roundLimit = 1;
+  state.players[0].money = 700;
+  state.players[1].money = 750;
+  state.properties[1].ownerId = 'a';
+  engine.voteForCityEvent('a', 'city_dividend');
+  engine.voteForCityEvent('b', 'city_dividend');
+  state.activePlayerIndex = 1;
+  state.phase = 'END_TURN';
+
+  assert.equal(engine.endTurn('b').success, true);
+  assert.equal(state.phase, 'GAME_OVER');
+  assert.equal(state.winnerId, 'a');
+  assert.equal(state.roundNumber, 1);
+  assert.equal(state.players[0].money, 700);
+  assert.equal(state.players[1].money, 750);
+  assert.equal(state.activeCityEvent, null);
+  assert.equal(state.cityEventVote, null);
+});
+
+test('round-limit wealth ties resolve by cash, then next-round turn order', () => {
+  const engine = new GameEngine('ROUND_TIE', [player('a'), player('b')], { roundLimit: 10 });
+  const state = engine.getState();
+  state.roundLimit = 1;
+  state.players[0].money = 790;
+  state.players[1].money = 850;
+  state.properties[1].ownerId = 'a';
+  state.activePlayerIndex = 1;
+  state.phase = 'END_TURN';
+
+  assert.equal(engine.endTurn('b').success, true);
+  assert.equal(state.phase, 'GAME_OVER');
+  assert.equal(state.winnerId, 'b');
+
+  const exactTie = new GameEngine('ROUND_TIE_ORDER', [player('a'), player('b')], { roundLimit: 1 });
+  exactTie.getState().activePlayerIndex = 1;
+  exactTie.getState().phase = 'END_TURN';
+  assert.equal(exactTie.endTurn('b').success, true);
+  assert.equal(exactTie.getState().winnerId, 'a');
+});
+
+test('fair comeback support uses its gap threshold and $250 per-player cap', () => {
+  const belowThreshold = new GameEngine('COMEBACK_THRESHOLD', [player('a'), player('b')], { comebackMode: 'fair' });
+  const thresholdState = belowThreshold.getState();
+  thresholdState.players[0].money = 1499;
+  thresholdState.players[1].money = 1000;
+  belowThreshold.voteForCityEvent('a', 'city_dividend');
+  belowThreshold.voteForCityEvent('b', 'city_dividend');
+  thresholdState.activePlayerIndex = 1;
+  thresholdState.phase = 'END_TURN';
+  assert.equal(belowThreshold.endTurn('b').success, true);
+  assert.equal(thresholdState.comebackRewardsAwarded?.b, 0);
+
+  const engine = new GameEngine('COMEBACK', [player('a'), player('b')], { comebackMode: 'fair' });
+  const state = engine.getState();
+  state.players[0].money = 1500;
+  state.players[1].money = 1000;
+
+  for (let round = 0; round < 8; round++) {
+    if (round > 0) state.players[0].money += 100;
+    engine.voteForCityEvent('a', 'city_dividend');
+    engine.voteForCityEvent('b', 'city_dividend');
+    state.activePlayerIndex = 1;
+    state.phase = 'END_TURN';
+    assert.equal(engine.endTurn('b').success, true);
+  }
+
+  assert.equal(state.comebackRewardsAwarded?.b, 250);
+  assert.equal(state.comebackRewardsAwarded?.a, 0);
+});
+
 test('bankrupt round starters are skipped without triggering a premature event', () => {
   const engine = new GameEngine('CITY_EVENT_BANKRUPTCY', [player('a'), player('b'), player('c')]);
   const state = engine.getState();
@@ -362,11 +435,17 @@ test('legacy snapshots receive a safe city event vote state', () => {
   delete snapshot.state.cityEventBuildDiscounts;
   delete snapshot.state.propertyUpgradeMode;
   delete snapshot.state.matchMissions;
+  delete snapshot.state.roundLimit;
+  delete snapshot.state.comebackMode;
+  delete snapshot.state.comebackRewardsAwarded;
   const restored = GameEngine.restore(snapshot);
   assert.equal(restored.getState().roundNumber, 1);
   assert.equal(restored.getState().roundStartPlayerId, 'a');
   assert.equal(restored.getState().cityEventVote?.forRound, 2);
   assert.equal(restored.getState().propertyUpgradeMode, 'standard');
+  assert.equal(restored.getState().roundLimit, 0);
+  assert.equal(restored.getState().comebackMode, 'off');
+  assert.deepEqual(restored.getState().comebackRewardsAwarded, { a: 0, b: 0 });
   assert.deepEqual(restored.getState().matchMissions?.a?.completed, []);
 });
 

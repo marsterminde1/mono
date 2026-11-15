@@ -134,6 +134,49 @@ test('older snapshots default to classic rules and unsupported sizes fall back s
   assert.equal(game(999).getState().boardSize, 40);
 });
 
+test('round-limited bot simulations cover every board and optional rule combination', context => {
+  let seed = 24681357;
+  context.mock.method(Math, 'random', () => {
+    seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;
+    return seed / 4294967296;
+  });
+  const metrics: string[] = [];
+
+  for (const size of BOARD_SIZE_OPTIONS) {
+    for (const propertyBuildMode of ['classic', 'quick'] as const) {
+      for (const propertyUpgradeMode of ['standard', 'landmark'] as const) {
+        for (const comebackMode of ['off', 'fair'] as const) {
+          seed = size * 1000 + (propertyBuildMode === 'quick' ? 100 : 0)
+            + (propertyUpgradeMode === 'landmark' ? 10 : 0) + (comebackMode === 'fair' ? 1 : 0);
+          let engine = new GameEngine(
+            `BALANCE-${size}-${propertyBuildMode}-${propertyUpgradeMode}-${comebackMode}`,
+            Array.from({ length: 4 }, (_, index) => player(`bot${index}`, true)),
+            { boardSize: size, propertyBuildMode, propertyUpgradeMode, roundLimit: 10, comebackMode }
+          );
+          let actions = 0;
+          while (engine.getState().phase !== 'GAME_OVER' && actions < 2400) {
+            assert.equal(stepBotOrAuction(engine), true);
+            actions++;
+            const state = engine.getState();
+            assert.ok(state.players.every(candidate => Number.isFinite(candidate.money) && candidate.position >= 0 && candidate.position < size));
+            assert.ok(Object.values(state.properties).every(property => property.houses >= 0 && property.houses <= 5));
+            if (actions % 50 === 0) engine = GameEngine.restore(JSON.parse(JSON.stringify(engine.snapshot())));
+          }
+
+          const state = engine.getState();
+          assert.equal(state.phase, 'GAME_OVER', `${size}/${propertyBuildMode}/${propertyUpgradeMode}/${comebackMode} did not finish`);
+          assert.ok(state.winnerId);
+          assert.ok((state.roundNumber ?? 1) <= 10);
+          assert.ok(Object.values(state.comebackRewardsAwarded ?? {}).every(amount => amount >= 0 && amount <= 250));
+          metrics.push(`${size}F ${propertyBuildMode}/${propertyUpgradeMode}/${comebackMode}: ${actions} Engine-Aktionen, Runde ${state.roundNumber}`);
+        }
+      }
+    }
+  }
+
+  context.diagnostic(`Deterministische Bot-Simulationen (keine Echtzeit-Minuten):\n${metrics.join('\n')}`);
+});
+
 test('XXL timeout preserves extra rolls and refreshes the deadline after each action', context => {
   let draw = 0;
   context.mock.method(Math, 'random', () => [.1, .3][draw++ % 2]);

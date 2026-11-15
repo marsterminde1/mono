@@ -4,7 +4,7 @@ import { eq, desc, sql } from 'drizzle-orm';
 import { database } from '../../db/index.js';
 import { accountSessions, rooms, scores } from '../../db/schema.js';
 import { GameEngine } from '../../src/game/GameEngine.js';
-import { AVAILABLE_TOKENS, PLAYER_COLORS, MAX_PLAYERS, TURN_LIMIT_OPTIONS } from '../../src/data/monopolyBoard.js';
+import { AVAILABLE_TOKENS, PLAYER_COLORS, MAX_PLAYERS, ROUND_LIMIT_OPTIONS, TURN_LIMIT_OPTIONS } from '../../src/data/monopolyBoard.js';
 import { MAX_GAME_LOGS } from '../../src/game/GameEngine.js';
 import { isBotDifficulty, type BotDifficulty, type Player, type LobbyRoom } from '../../src/types/game.js';
 import handleLocalGame from './_shared/localGame.mjs';
@@ -142,7 +142,7 @@ export default async (req: Request) => {
         let roomId = '';
         for (const byte of randomBytes(4)) roomId += alphabet[byte % alphabet.length];
         const player = makePlayer([]);
-        const lobby: LobbyRoom = { roomId, hostId: playerId, players: [player], status: 'WAITING', createdAt: Date.now(), settings: { maxPlayers: MAX_PLAYERS, turnSeconds: 25, boardSize: 40, propertyBuildMode: 'classic', propertyUpgradeMode: 'standard', botDifficulty: 'balanced' } };
+        const lobby: LobbyRoom = { roomId, hostId: playerId, players: [player], status: 'WAITING', createdAt: Date.now(), settings: { maxPlayers: MAX_PLAYERS, turnSeconds: 25, boardSize: 40, propertyBuildMode: 'classic', propertyUpgradeMode: 'standard', roundLimit: 0, comebackMode: 'off', botDifficulty: 'balanced' } };
         await tx.insert(rooms).values({ id: roomId, lobby });
         return { roomId, player, lobby };
       });
@@ -197,7 +197,7 @@ export default async (req: Request) => {
       const [row] = await tx.select().from(rooms).where(eq(rooms.id, roomId)).for('update');
       if (!row) throw new Error('Room not found');
       const lobby = row.lobby;
-      lobby.settings = { maxPlayers: MAX_PLAYERS, turnSeconds: 25, boardSize: 40, propertyBuildMode: 'classic', propertyUpgradeMode: 'standard', botDifficulty: 'balanced', ...lobby.settings };
+      lobby.settings = { maxPlayers: MAX_PLAYERS, turnSeconds: 25, boardSize: 40, propertyBuildMode: 'classic', propertyUpgradeMode: 'standard', roundLimit: 0, comebackMode: 'off', botDifficulty: 'balanced', ...lobby.settings };
       const capacity = Math.min(MAX_PLAYERS, Math.max(2, lobby.settings.maxPlayers));
       let engine = row.engine ? GameEngine.restore(row.engine) : null;
       let me = lobby.players.find(p => p.id === playerId);
@@ -235,9 +235,13 @@ export default async (req: Request) => {
         const propertyBuildMode = (data.propertyBuildMode ?? lobby.settings.propertyBuildMode ?? 'classic') === 'quick' ? 'quick' : 'classic';
         const propertyUpgradeMode = data.propertyUpgradeMode ?? lobby.settings.propertyUpgradeMode ?? 'standard';
         if (propertyUpgradeMode !== 'standard' && propertyUpgradeMode !== 'landmark') throw new Error('Invalid property upgrade mode');
+        const roundLimit = Number(data.roundLimit ?? lobby.settings.roundLimit ?? 0);
+        if (!(ROUND_LIMIT_OPTIONS as readonly number[]).includes(roundLimit)) throw new Error('Invalid round limit');
+        const comebackMode = data.comebackMode ?? lobby.settings.comebackMode ?? 'off';
+        if (comebackMode !== 'off' && comebackMode !== 'fair') throw new Error('Invalid comeback mode');
         const botDifficulty = data.botDifficulty ?? lobby.settings.botDifficulty ?? 'balanced';
         if (!isBotDifficulty(botDifficulty)) throw new Error('Invalid bot difficulty');
-        lobby.settings = { maxPlayers, turnSeconds, boardSize, propertyBuildMode, propertyUpgradeMode, botDifficulty };
+        lobby.settings = { maxPlayers, turnSeconds, boardSize, propertyBuildMode, propertyUpgradeMode, roundLimit, comebackMode, botDifficulty };
       } else if (event === 'lobby:remove_player') {
         requireHost(); requireLobby();
         if (data.targetPlayerId === playerId) throw new Error('Use leave to exit the room');
@@ -256,6 +260,8 @@ export default async (req: Request) => {
           boardSize: lobby.settings.boardSize,
           propertyBuildMode: lobby.settings.propertyBuildMode,
           propertyUpgradeMode: lobby.settings.propertyUpgradeMode,
+          roundLimit: lobby.settings.roundLimit,
+          comebackMode: lobby.settings.comebackMode,
         });
         lobby.status = 'PLAYING';
       } else if (event.startsWith('game:')) {

@@ -5,6 +5,7 @@ import {
   BoardTile,
   BotDifficulty,
   Card,
+  ComebackMode,
   CityEventId,
   GameLogEntry,
   GamePhase,
@@ -33,7 +34,14 @@ export class GameEngine {
   private chanceDeck: Card[];
   private communityDeck: Card[];
 
-  constructor(roomId: string, players: Player[], options: { turnSeconds?: number; boardSize?: number; propertyBuildMode?: PropertyBuildMode; propertyUpgradeMode?: PropertyUpgradeMode } = {}) {
+  constructor(roomId: string, players: Player[], options: {
+    turnSeconds?: number;
+    boardSize?: number;
+    propertyBuildMode?: PropertyBuildMode;
+    propertyUpgradeMode?: PropertyUpgradeMode;
+    roundLimit?: number;
+    comebackMode?: ComebackMode;
+  } = {}) {
     const rules = boardRules(options.boardSize);
     const propertyBuildMode = options.propertyBuildMode ?? 'classic';
     const propertyUpgradeMode = options.propertyUpgradeMode ?? 'standard';
@@ -80,6 +88,9 @@ export class GameEngine {
       logs: [],
       auction: null,
       roundNumber: 1,
+      roundLimit: options.roundLimit ?? 0,
+      comebackMode: options.comebackMode ?? 'off',
+      comebackRewardsAwarded: Object.fromEntries(players.map(player => [player.id, 0])),
       roundStartPlayerId: players[0]?.id ?? null,
       cityEventVote: null,
       activeCityEvent: null,
@@ -108,6 +119,10 @@ export class GameEngine {
       ...snapshot.state,
       logs: trimGameLogs(snapshot.state.logs),
       roundNumber: snapshot.state.roundNumber ?? 1,
+      roundLimit: snapshot.state.roundLimit ?? 0,
+      comebackMode: snapshot.state.comebackMode ?? 'off',
+      comebackRewardsAwarded: snapshot.state.comebackRewardsAwarded
+        ?? Object.fromEntries(snapshot.state.players.map(player => [player.id, 0])),
       propertyUpgradeMode: snapshot.state.propertyUpgradeMode ?? 'standard',
       roundStartPlayerId: snapshot.state.roundStartPlayerId ?? snapshot.state.players[snapshot.state.activePlayerIndex]?.id ?? null,
       cityEventVote: snapshot.state.cityEventVote ?? null,
@@ -1152,12 +1167,12 @@ export class GameEngine {
     // Shift to next active player
     this.state.doublesCount = 0;
     this.state.hasRolled = false;
-    this.advanceToNextPlayer();
-    this.state.phase = 'ROLL';
+    const gameOver = this.advanceToNextPlayer();
+    if (!gameOver) this.state.phase = 'ROLL';
     return { success: true };
   }
 
-  private advanceToNextPlayer(): void {
+  private advanceToNextPlayer(): boolean {
     this.state.rollsTaken = 0;
     this.state.bonusRoll = false;
     const nonBankrupt = this.state.players.filter((p) => !p.bankrupt);
@@ -1165,7 +1180,7 @@ export class GameEngine {
       this.state.phase = 'GAME_OVER';
       this.state.winnerId = nonBankrupt[0]?.id;
       this.addLog(`🏆 ${nonBankrupt[0]?.name || 'Player'} has won the game!`, 'system');
-      return;
+      return true;
     }
 
     let nextIdx = (this.state.activePlayerIndex + 1) % this.state.players.length;
@@ -1175,13 +1190,59 @@ export class GameEngine {
 
     this.state.activePlayerIndex = nextIdx;
     const nextPlayer = this.state.players[nextIdx];
-    this.addLog(`It is now ${nextPlayer.name}'s turn.`, 'system', nextPlayer);
     const roundStartPlayer = this.state.players.find(player => player.id === this.state.roundStartPlayerId);
     if (!roundStartPlayer || roundStartPlayer.bankrupt) {
       this.state.roundStartPlayerId = nextPlayer.id;
     } else if (nextPlayer.id === roundStartPlayer.id) {
+      const roundLimit = this.state.roundLimit ?? 0;
+      if (roundLimit > 0 && (this.state.roundNumber ?? 1) >= roundLimit) {
+        this.finishByNetWorth(nextPlayer);
+        return true;
+      }
+      this.addLog(`It is now ${nextPlayer.name}'s turn.`, 'system', nextPlayer);
       this.resolveCityEventRound(nextPlayer);
+      return this.state.phase === 'GAME_OVER';
     }
+    this.addLog(`It is now ${nextPlayer.name}'s turn.`, 'system', nextPlayer);
+    return false;
+  }
+
+  private getPlayerNetWorth(player: Player): number {
+    const ownedProperties = Object.values(this.state.properties).filter(property => property.ownerId === player.id);
+    return player.money + ownedProperties.reduce((total, property) => {
+      const tile = this.tiles[property.tileId];
+      return total
+        + (tile?.price || 0)
+        + property.houses * (tile?.houseCost || 50)
+        + (property.landmark ? (tile?.houseCost || 50) * 3 : 0);
+    }, 0);
+  }
+
+  private finishByNetWorth(roundStarter: Player): void {
+    const startIndex = this.state.players.findIndex(player => player.id === roundStarter.id);
+    const winner = this.state.players
+      .filter(player => !player.bankrupt)
+      .sort((first, second) => {
+        const wealthDifference = this.getPlayerNetWorth(second) - this.getPlayerNetWorth(first);
+        if (wealthDifference !== 0) return wealthDifference;
+        const cashDifference = second.money - first.money;
+        if (cashDifference !== 0) return cashDifference;
+        const firstDistance = (this.state.players.indexOf(first) - startIndex + this.state.players.length) % this.state.players.length;
+        const secondDistance = (this.state.players.indexOf(second) - startIndex + this.state.players.length) % this.state.players.length;
+        return firstDistance - secondDistance;
+      })[0];
+
+    this.state.phase = 'GAME_OVER';
+    this.state.winnerId = winner?.id;
+    this.state.auction = null;
+    this.state.cityEventVote = null;
+    this.state.turnDeadline = undefined;
+    this.state.turnClockKey = undefined;
+    this.addLog(
+      `Rundenlimit von ${this.state.roundLimit} Runden erreicht. ${winner?.name ?? 'Niemand'} gewinnt mit $${winner ? this.getPlayerNetWorth(winner) : 0} Vermögen.`,
+      'system',
+      winner
+    );
   }
 
   private resolveCityEventRound(nextPlayer: Player) {
@@ -1218,7 +1279,39 @@ export class GameEngine {
       }
     }
     this.addLog(`${selectedEvent.title} gilt in Runde ${nextRound}: ${selectedEvent.description}`, 'system');
+    this.applyComebackSupport();
     this.state.cityEventVote = this.createCityEventVote(nextRound + 1);
+  }
+
+  private applyComebackSupport(): void {
+    if (this.state.comebackMode !== 'fair') return;
+    const activePlayers = this.state.players.filter(player => !player.bankrupt);
+    if (activePlayers.length < 2) return;
+
+    const startIndex = this.state.activePlayerIndex;
+    const byTurnOrder = (first: Player, second: Player) => {
+      const firstDistance = (this.state.players.indexOf(first) - startIndex + this.state.players.length) % this.state.players.length;
+      const secondDistance = (this.state.players.indexOf(second) - startIndex + this.state.players.length) % this.state.players.length;
+      return firstDistance - secondDistance;
+    };
+    const leaderWealth = Math.max(...activePlayers.map(player => this.getPlayerNetWorth(player)));
+    const trailingPlayer = [...activePlayers].sort(
+      (first, second) => this.getPlayerNetWorth(first) - this.getPlayerNetWorth(second) || byTurnOrder(first, second)
+    )[0];
+    if (leaderWealth - this.getPlayerNetWorth(trailingPlayer) < 500) return;
+
+    const rewards = this.state.comebackRewardsAwarded ?? (this.state.comebackRewardsAwarded = {});
+    const alreadyAwarded = rewards[trailingPlayer.id] ?? 0;
+    const reward = Math.min(50, Math.max(0, 250 - alreadyAwarded));
+    if (reward === 0) return;
+
+    trailingPlayer.money += reward;
+    rewards[trailingPlayer.id] = alreadyAwarded + reward;
+    this.addLog(
+      `Aufholhilfe: ${trailingPlayer.name} erhält $${reward} Spielgeld (maximal $250 pro Partie).`,
+      'system',
+      trailingPlayer
+    );
   }
 
   // Bankruptcy
@@ -1261,8 +1354,8 @@ export class GameEngine {
       this.state.doublesCount = 0;
       this.state.hasRolled = false;
       this.state.pendingCard = null;
-      this.advanceToNextPlayer();
-      this.state.phase = 'ROLL';
+      const gameOver = this.advanceToNextPlayer();
+      if (!gameOver) this.state.phase = 'ROLL';
     }
 
     return { success: true };

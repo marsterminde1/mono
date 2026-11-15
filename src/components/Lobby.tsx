@@ -2,8 +2,8 @@ import { Bot, Crown, Check, Copy, Share2, UserPlus, X } from 'lucide-react';
 import { TokenArt, tokenLabel } from './TokenArt';
 import { BOARD_SIZE_OPTIONS, boardRules } from '../data/boardVariants';
 import React, { useState } from 'react';
-import { AVAILABLE_TOKENS, PLAYER_COLORS, MAX_PLAYERS, TURN_LIMIT_OPTIONS } from '../data/monopolyBoard';
-import { BotDifficulty, LobbyRoom, Player, PlayerToken, PropertyUpgradeMode } from '../types/game';
+import { AVAILABLE_TOKENS, PLAYER_COLORS, MAX_PLAYERS, ROUND_LIMIT_OPTIONS, TURN_LIMIT_OPTIONS } from '../data/monopolyBoard';
+import { BotDifficulty, ComebackMode, LobbyRoom, Player, PlayerToken, PropertyUpgradeMode } from '../types/game';
 import { playSound } from '../utils/sound';
 
 interface LobbyProps {
@@ -15,7 +15,7 @@ interface LobbyProps {
   onRemovePlayer: (playerId: string) => void;
   onStartGame: () => void;
   onLeaveLobby: () => void;
-  onUpdateSettings: (settings: { maxPlayers: number; turnSeconds: number; boardSize?: number; propertyBuildMode?: 'classic' | 'quick'; propertyUpgradeMode?: PropertyUpgradeMode; botDifficulty?: BotDifficulty }) => void;
+  onUpdateSettings: (settings: { maxPlayers: number; turnSeconds: number; boardSize?: number; propertyBuildMode?: 'classic' | 'quick'; propertyUpgradeMode?: PropertyUpgradeMode; roundLimit?: number; comebackMode?: ComebackMode; botDifficulty?: BotDifficulty }) => void;
 }
 
 export const Lobby: React.FC<LobbyProps> = ({
@@ -40,7 +40,7 @@ export const Lobby: React.FC<LobbyProps> = ({
 
   const [linkCopied, setLinkCopied] = useState(false);
   const isHost = currentPlayer.isHost;
-  const settings = { maxPlayers: MAX_PLAYERS, turnSeconds: 25, boardSize: 40, propertyBuildMode: 'classic' as const, propertyUpgradeMode: 'standard' as PropertyUpgradeMode, botDifficulty: 'balanced' as BotDifficulty, ...lobby.settings };
+  const settings = { maxPlayers: MAX_PLAYERS, turnSeconds: 25, boardSize: 40, propertyBuildMode: 'classic' as const, propertyUpgradeMode: 'standard' as PropertyUpgradeMode, roundLimit: 0, comebackMode: 'off' as ComebackMode, botDifficulty: 'balanced' as BotDifficulty, ...lobby.settings };
   const inviteLink = `${window.location.origin}/?room=${lobby.roomId}`;
   const handleCopyLink = async () => {
     playSound('click');
@@ -128,7 +128,7 @@ export const Lobby: React.FC<LobbyProps> = ({
 
       <section className="arena-lobby-status" aria-label="Startbereitschaft">
         <div><span className="arena-lobby-eyebrow">DEINE NÄCHSTE RUNDE</span><h2>{lobby.players.length >= 2 && waitingPlayers.length === 0 ? 'Der Tisch ist bereit.' : 'Gleich geht’s los.'}</h2><p role="status">{startHint}</p></div>
-        <div className="arena-lobby-summary"><span><strong>{readyCount} / {lobby.players.length}</strong> bereit</span><span><strong>{settings.boardSize}</strong> Felder</span><span><strong>{settings.turnSeconds === 0 ? 'Ohne' : `${settings.turnSeconds} s`}</strong> Zeitlimit</span></div>
+        <div className="arena-lobby-summary"><span><strong>{readyCount} / {lobby.players.length}</strong> bereit</span><span><strong>{settings.boardSize}</strong> Felder</span><span><strong>{settings.turnSeconds === 0 ? 'Ohne' : `${settings.turnSeconds} s`}</strong> Zeit pro Aktion</span><span><strong>Rundenlimit</strong> {settings.roundLimit === 0 ? 'unbegrenzt' : `${settings.roundLimit} Runden`}</span></div>
       </section>
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
         {/* Left: Player list (2 cols) */}
@@ -410,6 +410,19 @@ export const Lobby: React.FC<LobbyProps> = ({
                 </select>
               </label>
               {settings.propertyUpgradeMode === 'landmark' && <p className="text-[11px] text-slate-500">Vollständiges Farbset ohne Hypothek nötig. Das Wahrzeichen kostet das Dreifache des Hauspreises, erhöht die Hotelmiete um 50 % und bringt beim Verkauf die Hälfte des Ausbaupreises zurück.</p>}
+              <label className="block text-xs font-semibold text-slate-400">Rundenlimit
+                <select value={settings.roundLimit} disabled={!isHost} onChange={e => onUpdateSettings({ ...settings, roundLimit: Number(e.target.value) })} className="w-full mt-1 bg-slate-950 border border-slate-700 text-white rounded-lg px-3 py-2 text-sm disabled:opacity-60">
+                  {ROUND_LIMIT_OPTIONS.map(rounds => <option key={rounds} value={rounds}>{rounds === 0 ? 'Aus – unbegrenzt' : `${rounds} vollständige Runden`}</option>)}
+                </select>
+              </label>
+              {settings.roundLimit > 0 && <p className="text-[11px] text-slate-500">Nach der gewählten Zahl vollständiger Runden gewinnt das höchste Vermögen (Bargeld, Grundstücke und Gebäude). Bei Gleichstand entscheidet mehr Bargeld, danach die Sitzreihenfolge ab dem nächsten Rundenstart.</p>}
+              <label className="block text-xs font-semibold text-slate-400">Aufholhilfe
+                <select value={settings.comebackMode} disabled={!isHost} onChange={e => onUpdateSettings({ ...settings, comebackMode: e.target.value as ComebackMode })} className="w-full mt-1 bg-slate-950 border border-slate-700 text-white rounded-lg px-3 py-2 text-sm disabled:opacity-60">
+                  <option value="off">Aus</option>
+                  <option value="fair">Fair – kleine Spielgeldhilfe</option>
+                </select>
+              </label>
+              {settings.comebackMode === 'fair' && <p className="text-[11px] text-slate-500">Einmal pro Runde erhält die ärmste aktive Person $50, wenn sie mindestens $500 hinter der Führung liegt. Gleichstand: Sitzreihenfolge ab Rundenstart. Höchstens $250 pro Person und Partie.</p>}
               <label className="block text-xs font-semibold text-slate-400">Bot-Stärke
                 <select value={settings.botDifficulty} disabled={!isHost} onChange={e => onUpdateSettings({ ...settings, botDifficulty: e.target.value as BotDifficulty })} className="w-full mt-1 bg-slate-950 border border-slate-700 text-white rounded-lg px-3 py-2 text-sm disabled:opacity-60">
                   <option value="easy">Einfach – kauft öfter, hält wenig Reserve</option>
@@ -439,7 +452,7 @@ export const Lobby: React.FC<LobbyProps> = ({
                   {TURN_LIMIT_OPTIONS.map((s) => <option key={s} value={s}>{s === 0 ? 'Aus – kein Zeitlimit' : `${s} Sekunden`}</option>)}
                 </select>
               </label>
-              {!isHost && <p className="text-[11px] text-slate-500">Der Gastgeber legt Brettgröße, Spielerzahl und Zeitlimit fest.</p>}
+              {!isHost && <p className="text-[11px] text-slate-500">Der Gastgeber legt Brettgröße, Spielerzahl, Zeitlimit und optionale Spielregeln fest.</p>}
             </div>
 
             <p className="arena-lobby-timer-note">Mit Zeitlimit führt das Spiel ausstehende Aktionen nach Ablauf automatisch aus.</p>

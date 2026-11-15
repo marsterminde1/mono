@@ -2,7 +2,7 @@ import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { mkdir, open, readFile, rename, stat, unlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { BOARD_SIZE_OPTIONS, getBoardTiles } from '../../../src/data/boardVariants.js';
-import { AVAILABLE_TOKENS, PLAYER_COLORS, MAX_PLAYERS, TURN_LIMIT_OPTIONS } from '../../../src/data/monopolyBoard.js';
+import { AVAILABLE_TOKENS, PLAYER_COLORS, MAX_PLAYERS, ROUND_LIMIT_OPTIONS, TURN_LIMIT_OPTIONS } from '../../../src/data/monopolyBoard.js';
 import { GameEngine, MAX_GAME_LOGS } from '../../../src/game/GameEngine.js';
 import { isBotDifficulty, type BotDifficulty, type LobbyRoom, type Player } from '../../../src/types/game.js';
 import { canSkipUnchangedPoll } from './polling.mjs';
@@ -216,7 +216,7 @@ async function runLocalGame(request: Request) {
         players: [player],
         status: 'WAITING',
         createdAt: Date.now(),
-        settings: { maxPlayers: MAX_PLAYERS, turnSeconds: 25, boardSize: 40, propertyBuildMode: 'classic', propertyUpgradeMode: 'standard', botDifficulty: 'balanced' },
+        settings: { maxPlayers: MAX_PLAYERS, turnSeconds: 25, boardSize: 40, propertyBuildMode: 'classic', propertyUpgradeMode: 'standard', roundLimit: 0, comebackMode: 'off', botDifficulty: 'balanced' },
       };
       rooms.set(roomId, { lobby, engine: null, revision: 1, updatedAt: Date.now(), scoreSaved: false });
       return respond({ success: true, roomId, player, lobby, revision: 1 });
@@ -226,7 +226,7 @@ async function runLocalGame(request: Request) {
     const room = rooms.get(roomId);
     if (!room) return respond({ success: false, error: 'Room not found' }, 404);
     const { lobby } = room;
-    lobby.settings = { maxPlayers: MAX_PLAYERS, turnSeconds: 25, boardSize: 40, propertyBuildMode: 'classic', propertyUpgradeMode: 'standard', botDifficulty: 'balanced', ...lobby.settings };
+    lobby.settings = { maxPlayers: MAX_PLAYERS, turnSeconds: 25, boardSize: 40, propertyBuildMode: 'classic', propertyUpgradeMode: 'standard', roundLimit: 0, comebackMode: 'off', botDifficulty: 'balanced', ...lobby.settings };
     const capacity = Math.min(MAX_PLAYERS, Math.max(2, lobby.settings.maxPlayers));
     const engine = room.engine;
     let player = lobby.players.find(candidate => candidate.id === playerId);
@@ -291,9 +291,13 @@ async function runLocalGame(request: Request) {
       const propertyBuildMode = (data.propertyBuildMode ?? lobby.settings.propertyBuildMode ?? 'classic') === 'quick' ? 'quick' : 'classic';
       const propertyUpgradeMode = data.propertyUpgradeMode ?? lobby.settings.propertyUpgradeMode ?? 'standard';
       if (propertyUpgradeMode !== 'standard' && propertyUpgradeMode !== 'landmark') throw new Error('Invalid property upgrade mode');
+      const roundLimit = Number(data.roundLimit ?? lobby.settings.roundLimit ?? 0);
+      if (!(ROUND_LIMIT_OPTIONS as readonly number[]).includes(roundLimit)) throw new Error('Invalid round limit');
+      const comebackMode = data.comebackMode ?? lobby.settings.comebackMode ?? 'off';
+      if (comebackMode !== 'off' && comebackMode !== 'fair') throw new Error('Invalid comeback mode');
       const botDifficulty = data.botDifficulty ?? lobby.settings.botDifficulty ?? 'balanced';
       if (!isBotDifficulty(botDifficulty)) throw new Error('Invalid bot difficulty');
-      lobby.settings = { maxPlayers, turnSeconds, boardSize, propertyBuildMode, propertyUpgradeMode, botDifficulty };
+      lobby.settings = { maxPlayers, turnSeconds, boardSize, propertyBuildMode, propertyUpgradeMode, roundLimit, comebackMode, botDifficulty };
     } else if (event === 'lobby:remove_player') {
       requireHost();
       requireLobby();
@@ -317,6 +321,8 @@ async function runLocalGame(request: Request) {
         boardSize: lobby.settings.boardSize,
         propertyBuildMode: lobby.settings.propertyBuildMode,
         propertyUpgradeMode: lobby.settings.propertyUpgradeMode,
+        roundLimit: lobby.settings.roundLimit,
+        comebackMode: lobby.settings.comebackMode,
       });
       lobby.status = 'PLAYING';
     } else if (typeof event === 'string' && event.startsWith('game:')) {
