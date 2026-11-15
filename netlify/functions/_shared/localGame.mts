@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { BOARD_SIZE_OPTIONS, getBoardTiles } from '../../../src/data/boardVariants.js';
 import { AVAILABLE_TOKENS, PLAYER_COLORS, MAX_PLAYERS, ROUND_LIMIT_OPTIONS, TURN_LIMIT_OPTIONS } from '../../../src/data/monopolyBoard.js';
 import { GameEngine, MAX_GAME_LOGS } from '../../../src/game/GameEngine.js';
+import { isRankedGame, publicPlayerName, toPublicRankedLeaderboardRecord } from '../../../src/lib/leaderboard.js';
 import { isBotDifficulty, type BotDifficulty, type LobbyRoom, type Player } from '../../../src/types/game.js';
 import { canSkipUnchangedPoll } from './polling.mjs';
 import { reconcileLobbyHost } from './roomLifecycle.mjs';
@@ -27,6 +28,8 @@ interface LocalScore {
   wins: number;
   gamesPlayed: number;
   totalCashEarned: number;
+  rankedWins: number;
+  rankedGamesPlayed: number;
   updatedAt: string;
 }
 
@@ -64,7 +67,9 @@ async function loadLocalState() {
     rooms.set(id, { ...room, engine: room.engine ? GameEngine.restore(room.engine) : null });
   }
   scores.clear();
-  for (const score of saved.scores || []) scores.set(score.id, score);
+  for (const score of saved.scores || []) {
+    scores.set(score.id, { ...score, rankedWins: score.rankedWins ?? 0, rankedGamesPlayed: score.rankedGamesPlayed ?? 0 });
+  }
 }
 
 async function saveLocalState() {
@@ -187,7 +192,16 @@ async function runLocalGame(request: Request) {
 
   try {
     if (request.method === 'GET') {
-      return respond([...scores.values()].sort((a, b) => b.wins - a.wins || b.totalCashEarned - a.totalCashEarned).slice(0, 10));
+      const entries = [...scores.values()]
+        .filter(score => score.rankedGamesPlayed > 0)
+        .sort((a, b) => b.rankedWins - a.rankedWins || b.rankedGamesPlayed - a.rankedGamesPlayed)
+        .slice(0, 10)
+        .map(toPublicRankedLeaderboardRecord);
+      const playerRecord = scores.get(playerId);
+      return respond({
+        entries,
+        player: playerRecord?.rankedGamesPlayed ? toPublicRankedLeaderboardRecord(playerRecord) : null,
+      });
     }
     if (request.method !== 'POST') return respond({ success: false, error: 'Method not allowed' }, 405);
     if (request.headers.get('origin') && request.headers.get('origin') !== new URL(request.url).origin) {
@@ -385,25 +399,29 @@ async function runLocalGame(request: Request) {
     const gameState = currentEngine?.getState() || null;
 
     if (gameState?.phase === 'GAME_OVER' && !room.scoreSaved) {
-      for (const finishedPlayer of gameState.players.filter(candidate => !candidate.isBot)) {
-        const old = scores.get(finishedPlayer.id);
-        const won = finishedPlayer.id === gameState.winnerId;
-        const worth = finishedPlayer.money + Object.values(gameState.properties)
-          .filter(property => property.ownerId === finishedPlayer.id)
-          .reduce((sum, property) => {
-            const tile = getBoardTiles(gameState.boardSize)[property.tileId];
-            return sum + (tile?.price || 0)
-              + property.houses * (tile?.houseCost || 0)
-              + (property.landmark ? 3 * (tile?.houseCost || 0) : 0);
-          }, 0);
-        scores.set(finishedPlayer.id, {
-          id: finishedPlayer.id,
-          username: finishedPlayer.name,
-          wins: (old?.wins || 0) + (won ? 1 : 0),
-          gamesPlayed: (old?.gamesPlayed || 0) + 1,
-          totalCashEarned: (old?.totalCashEarned || 0) + (won ? Math.max(0, worth) : 0),
-          updatedAt: new Date().toISOString(),
-        });
+      if (isRankedGame(gameState.players, gameState.winnerId)) {
+        for (const finishedPlayer of gameState.players) {
+          const old = scores.get(finishedPlayer.id);
+          const won = finishedPlayer.id === gameState.winnerId;
+          const worth = finishedPlayer.money + Object.values(gameState.properties)
+            .filter(property => property.ownerId === finishedPlayer.id)
+            .reduce((sum, property) => {
+              const tile = getBoardTiles(gameState.boardSize)[property.tileId];
+              return sum + (tile?.price || 0)
+                + property.houses * (tile?.houseCost || 0)
+                + (property.landmark ? 3 * (tile?.houseCost || 0) : 0);
+            }, 0);
+          scores.set(finishedPlayer.id, {
+            id: finishedPlayer.id,
+            username: publicPlayerName(finishedPlayer.id),
+            wins: (old?.wins || 0) + (won ? 1 : 0),
+            gamesPlayed: (old?.gamesPlayed || 0) + 1,
+            totalCashEarned: (old?.totalCashEarned || 0) + (won ? Math.max(0, worth) : 0),
+            rankedWins: (old?.rankedWins || 0) + (won ? 1 : 0),
+            rankedGamesPlayed: (old?.rankedGamesPlayed || 0) + 1,
+            updatedAt: new Date().toISOString(),
+          });
+        }
       }
       room.scoreSaved = true;
     }

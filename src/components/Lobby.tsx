@@ -56,10 +56,10 @@ export const Lobby: React.FC<LobbyProps> = ({
   const readyCount = lobby.players.length - waitingPlayers.length;
   const freeSeats = Math.max(0, settings.maxPlayers - lobby.players.length);
   const startHint = lobby.players.length < 2
-    ? 'Lade jemanden ein oder füge einen Bot hinzu. Ihr braucht mindestens zwei Spieler.'
+    ? 'Mindestens 2 Spieler nötig.'
     : waitingPlayers.length > 0
-      ? `Noch nicht bereit: ${waitingPlayers.map(p => p.name).join(', ')}.`
-      : isHost ? 'Alle sind bereit. Du kannst die Runde starten.' : 'Alle sind bereit. Der Gastgeber startet die Runde.';
+      ? `Warte auf ${waitingPlayers.length} Spieler.`
+      : isHost ? 'Alle bereit. Du kannst starten.' : 'Alle bereit. Warte auf den Gastgeber.';
   const canStart =
     isHost &&
     lobby.players.length >= 2 &&
@@ -89,7 +89,7 @@ export const Lobby: React.FC<LobbyProps> = ({
   };
 
   return (
-    <div className="arena-lobby w-full max-w-4xl mx-auto p-4 md:p-6 flex flex-col gap-6">
+    <div className="arena-lobby w-full max-w-4xl mx-auto p-4 md:p-6 flex flex-col gap-4">
       {copyError && <p role="status" className="rounded-xl border border-amber-500/40 bg-slate-900 p-3 text-sm text-amber-200">{copyError}</p>}
       {/* Header bar */}
       <div className="arena-lobby-header flex flex-wrap items-center justify-between gap-4 bg-slate-900 border border-slate-800 text-white p-5 rounded-2xl shadow-xl">
@@ -98,8 +98,7 @@ export const Lobby: React.FC<LobbyProps> = ({
             <TokenArt token="🎩" />
           </div>
           <div>
-            <h1 className="text-xl font-bold tracking-tight">Deine Lobby</h1>
-            <p className="text-xs text-slate-400">Freunde einladen · Figuren wählen · Gemeinsam starten</p>
+            <h1 className="text-xl font-bold tracking-tight">Lobby</h1>
           </div>
         </div>
 
@@ -121,22 +120,31 @@ export const Lobby: React.FC<LobbyProps> = ({
             className="cursor-pointer p-2 flex items-center gap-2 bg-amber-500 hover:bg-amber-400 text-slate-950 rounded-lg text-xs font-bold transition-colors"
             title={inviteLink}
           >
-            <Share2 size={15} /> {linkCopied ? 'Einladung geteilt' : 'Freunde einladen'}
+            <Share2 size={15} /> {linkCopied ? 'Geteilt' : 'Link teilen'}
           </button>
         </div>
       </div>
 
       <section className="arena-lobby-status" aria-label="Startbereitschaft">
-        <div><span className="arena-lobby-eyebrow">DEINE NÄCHSTE RUNDE</span><h2>{lobby.players.length >= 2 && waitingPlayers.length === 0 ? 'Der Tisch ist bereit.' : 'Gleich geht’s los.'}</h2><p role="status">{startHint}</p></div>
-        <div className="arena-lobby-summary"><span><strong>{readyCount} / {lobby.players.length}</strong> bereit</span><span><strong>{settings.boardSize}</strong> Felder</span><span><strong>{settings.turnSeconds === 0 ? 'Ohne' : `${settings.turnSeconds} s`}</strong> Zeit pro Aktion</span><span><strong>Rundenlimit</strong> {settings.roundLimit === 0 ? 'unbegrenzt' : `${settings.roundLimit} Runden`}</span></div>
+        <div>
+          <span className="arena-lobby-eyebrow">STATUS</span>
+          <h2>{lobby.players.length < 2 ? 'Spieler hinzufügen' : waitingPlayers.length > 0 ? 'Warten auf Spieler' : 'Bereit zum Start'}</h2>
+          <p role="status">{startHint}</p>
+        </div>
+        <div className="arena-lobby-summary">
+          <span><strong>{readyCount}/{lobby.players.length}</strong>bereit</span>
+          <span><strong>{settings.boardSize}</strong>Felder</span>
+          <span><strong>{settings.turnSeconds === 0 ? 'Aus' : `${settings.turnSeconds}s`}</strong>Zugzeit</span>
+          <span><strong>{settings.roundLimit === 0 ? '∞' : settings.roundLimit}</strong>Runden</span>
+        </div>
       </section>
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         {/* Left: Player list (2 cols) */}
         <div className="md:col-span-2 bg-slate-900/90 border border-slate-800 rounded-2xl p-5 shadow-xl flex flex-col justify-between">
           <div>
             <div className="flex items-center justify-between mb-4">
               <h2 className="text-sm font-bold uppercase tracking-wider text-slate-300">
-                Spieler am Tisch ({lobby.players.length}/{settings.maxPlayers})
+                Spieler <span className="text-slate-500">{lobby.players.length}/{settings.maxPlayers}</span>
               </h2>
               {isHost && lobby.players.length < settings.maxPlayers && (
                 <button
@@ -191,12 +199,12 @@ export const Lobby: React.FC<LobbyProps> = ({
                             </span>
                           ) : player.isBot ? (
                             <span className="text-blue-400 font-medium flex items-center gap-1">
-                              <Bot size={12} /> Bot · bereit
+                              <Bot size={12} /> Bot
                             </span>
                           ) : player.isReady ? (
                             <span className="text-emerald-400 font-medium">Bereit</span>
                           ) : (
-                            <span className="text-slate-400">Noch nicht bereit</span>
+                            <span className="text-slate-400">Wartet</span>
                           )}
                         </div>
                       </div>
@@ -220,11 +228,11 @@ export const Lobby: React.FC<LobbyProps> = ({
                 );
               })}
             </div>
-            {freeSeats > 0 && <div className="arena-lobby-open-seat"><UserPlus size={18} /><span>{freeSeats === 1 ? 'Ein Platz ist noch frei.' : `${freeSeats} Plätze sind noch frei.`}<small>Teile die Einladung oder den Raumcode mit deinen Freunden.</small></span></div>}
+            {freeSeats > 0 && <div className="arena-lobby-open-seat"><UserPlus size={16} /><span>{freeSeats === 1 ? '1 Platz frei' : `${freeSeats} Plätze frei`}</span></div>}
           </div>
 
           {/* Action bottom row */}
-          <div className="mt-8 pt-4 border-t border-slate-800 flex flex-wrap items-center justify-between gap-3">
+          <div className="mt-5 pt-4 border-t border-slate-800 flex flex-wrap items-center justify-between gap-3">
             <button
               onClick={() => {
                 playSound('click');
@@ -232,7 +240,7 @@ export const Lobby: React.FC<LobbyProps> = ({
               }}
               className="cursor-pointer text-xs font-semibold text-slate-400 hover:text-white px-3 py-2 rounded-lg hover:bg-slate-800 transition-colors"
             >
-              Lobby verlassen
+              Verlassen
             </button>
 
             <div className="flex items-center gap-3">
@@ -248,7 +256,7 @@ export const Lobby: React.FC<LobbyProps> = ({
                       : 'bg-slate-700 hover:bg-slate-600 text-slate-200'
                   }`}
                 >
-                  {currentPlayer.isReady ? 'Bereit · zurücknehmen' : 'Ich bin bereit'}
+                  {currentPlayer.isReady ? 'Bereitschaft zurücknehmen' : 'Bereit'}
                 </button>
               )}
 
@@ -293,7 +301,6 @@ export const Lobby: React.FC<LobbyProps> = ({
               </div>
               <div className="flex-1">
                 <div className="font-bold text-white text-base">{currentPlayer.name}</div>
-                <div className="text-xs text-slate-400">Startkapital: ${boardRules(settings.boardSize).startingCash}</div>
               </div>
               <button
                 disabled={isSaving}
@@ -409,29 +416,28 @@ export const Lobby: React.FC<LobbyProps> = ({
                   <option value="landmark">Wahrzeichen – Hotel weiterentwickeln</option>
                 </select>
               </label>
-              {settings.propertyUpgradeMode === 'landmark' && <p className="text-[11px] text-slate-500">Vollständiges Farbset ohne Hypothek nötig. Das Wahrzeichen kostet das Dreifache des Hauspreises, erhöht die Hotelmiete um 50 % und bringt beim Verkauf die Hälfte des Ausbaupreises zurück.</p>}
+              {settings.propertyUpgradeMode === 'landmark' && <p className="text-[11px] text-slate-500">Vollset ohne Hypothek · kostet 3× Hauspreis · +50 % Hotelmiete.</p>}
               <label className="block text-xs font-semibold text-slate-400">Rundenlimit
                 <select value={settings.roundLimit} disabled={!isHost} onChange={e => onUpdateSettings({ ...settings, roundLimit: Number(e.target.value) })} className="w-full mt-1 bg-slate-950 border border-slate-700 text-white rounded-lg px-3 py-2 text-sm disabled:opacity-60">
-                  {ROUND_LIMIT_OPTIONS.map(rounds => <option key={rounds} value={rounds}>{rounds === 0 ? 'Aus – unbegrenzt' : `${rounds} vollständige Runden`}</option>)}
+                  {ROUND_LIMIT_OPTIONS.map(rounds => <option key={rounds} value={rounds}>{rounds === 0 ? 'Unbegrenzt' : `${rounds} Runden`}</option>)}
                 </select>
               </label>
-              {settings.roundLimit > 0 && <p className="text-[11px] text-slate-500">Nach der gewählten Zahl vollständiger Runden gewinnt das höchste Vermögen (Bargeld, Grundstücke und Gebäude). Bei Gleichstand entscheidet mehr Bargeld, danach die Sitzreihenfolge ab dem nächsten Rundenstart.</p>}
+              {settings.roundLimit > 0 && <p className="text-[11px] text-slate-500">Nach dem Limit gewinnt das höchste Vermögen.</p>}
               <label className="block text-xs font-semibold text-slate-400">Aufholhilfe
                 <select value={settings.comebackMode} disabled={!isHost} onChange={e => onUpdateSettings({ ...settings, comebackMode: e.target.value as ComebackMode })} className="w-full mt-1 bg-slate-950 border border-slate-700 text-white rounded-lg px-3 py-2 text-sm disabled:opacity-60">
                   <option value="off">Aus</option>
-                  <option value="fair">Fair – kleine Spielgeldhilfe</option>
+                  <option value="fair">Fair</option>
                 </select>
               </label>
-              {settings.comebackMode === 'fair' && <p className="text-[11px] text-slate-500">Einmal pro Runde erhält die ärmste aktive Person $50, wenn sie mindestens $500 hinter der Führung liegt. Gleichstand: Sitzreihenfolge ab Rundenstart. Höchstens $250 pro Person und Partie.</p>}
+              {settings.comebackMode === 'fair' && <p className="text-[11px] text-slate-500">Ab $500 Rückstand: $50 pro Runde, höchstens $250 je Person.</p>}
               <label className="block text-xs font-semibold text-slate-400">Bot-Stärke
                 <select value={settings.botDifficulty} disabled={!isHost} onChange={e => onUpdateSettings({ ...settings, botDifficulty: e.target.value as BotDifficulty })} className="w-full mt-1 bg-slate-950 border border-slate-700 text-white rounded-lg px-3 py-2 text-sm disabled:opacity-60">
-                  <option value="easy">Einfach – kauft öfter, hält wenig Reserve</option>
-                  <option value="balanced">Ausgeglichen – spart etwas Geld</option>
-                  <option value="strategic">Strategisch – achtet auf Sets und Ertrag</option>
+                  <option value="easy">Einfach</option>
+                  <option value="balanced">Ausgeglichen</option>
+                  <option value="strategic">Strategisch</option>
                 </select>
               </label>
-              <p className="text-xs text-slate-500">Gilt für alle Bots in dieser Partie. Sie bewerten Käufe, Ausbau, Notverkäufe und Tauschvorschläge nach derselben Stufe.</p>
-              <p className="text-xs text-amber-200">${boardRules(settings.boardSize).startingCash.toLocaleString('de-DE')} Startgeld · ${boardRules(settings.boardSize).salary} beim Überqueren von LOS · {boardRules(settings.boardSize).rollsPerTurn} {boardRules(settings.boardSize).rollsPerTurn === 1 ? 'Wurf' : 'Würfe'} pro Zug. Pasch gibt weiterhin einen Zusatzwurf. Gefängnis beendet die Zusatzwürfe.</p>
+              <p className="text-xs text-amber-200">Start ${boardRules(settings.boardSize).startingCash.toLocaleString('de-DE')} · LOS +${boardRules(settings.boardSize).salary} · {boardRules(settings.boardSize).rollsPerTurn} {boardRules(settings.boardSize).rollsPerTurn === 1 ? 'Wurf' : 'Würfe'} pro Zug</p>
               <label className="block text-xs font-semibold text-slate-400">
                 Max. Spieler: <span className="text-amber-400">{settings.maxPlayers}</span>
                 <input
@@ -452,37 +458,10 @@ export const Lobby: React.FC<LobbyProps> = ({
                   {TURN_LIMIT_OPTIONS.map((s) => <option key={s} value={s}>{s === 0 ? 'Aus – kein Zeitlimit' : `${s} Sekunden`}</option>)}
                 </select>
               </label>
-              {!isHost && <p className="text-[11px] text-slate-500">Der Gastgeber legt Brettgröße, Spielerzahl, Zeitlimit und optionale Spielregeln fest.</p>}
+              {!isHost && <p className="text-[11px] text-slate-500">Einstellungen nur durch den Gastgeber.</p>}
             </div>
 
-            <p className="arena-lobby-timer-note">Mit Zeitlimit führt das Spiel ausstehende Aktionen nach Ablauf automatisch aus.</p>
-            {/* Quick Game Info */}
-            <div className="mt-6 space-y-2 text-xs text-slate-400">
-              <div className="flex justify-between py-1 border-b border-slate-800/60">
-                <span>Spielmodus</span>
-                <span className="font-semibold text-slate-300">{settings.boardSize === 40 ? 'Klassische Arena' : `${settings.boardSize} Felder · Arena`}</span>
-              </div>
-              <div className="flex justify-between py-1 border-b border-slate-800/60">
-                <span>Hausbau</span>
-                <span className="font-semibold text-slate-300">{settings.propertyBuildMode === 'quick' ? 'Ab 2 Feldern' : 'Vollset nötig'}</span>
-              </div>
-              <div className="flex justify-between py-1 border-b border-slate-800/60">
-                <span>Gebäude-Ausbau</span>
-                <span className="font-semibold text-slate-300">{settings.propertyUpgradeMode === 'landmark' ? 'Wahrzeichen möglich' : 'Standard'}</span>
-              </div>
-              <div className="flex justify-between py-1 border-b border-slate-800/60">
-                <span>Startkapital</span>
-                <span className="font-semibold text-emerald-400">${boardRules(settings.boardSize).startingCash}</span>
-              </div>
-              <div className="flex justify-between py-1 border-b border-slate-800/60">
-                <span>LOS-Bonus</span>
-                <span className="font-semibold text-emerald-400">+${boardRules(settings.boardSize).salary}</span>
-              </div>
-              <div className="flex justify-between py-1">
-                <span>Jackpot</span>
-                <span className="font-semibold text-slate-300">Frei-Parken-Topf</span>
-              </div>
-            </div>
+            <p className="arena-lobby-timer-note">Zeit abgelaufen: Offene Aktion wird automatisch ausgeführt.</p>
           </div>
         </div>
       </div>

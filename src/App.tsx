@@ -544,7 +544,7 @@ export default function App() {
       {/* Screen 1: MAIN MENU */}
       {view === 'MENU' && (
         <div className="portfolio-shell">
-          <header className="portfolio-header">
+          <header className="portfolio-header arena-home-header">
             <span className="portfolio-brand">
               <span className="brand-gem" aria-hidden="true">
                 <svg viewBox="0 0 32 32" fill="none">
@@ -566,16 +566,12 @@ export default function App() {
               </span>
               ARENA DISTRICTS
             </span>
-            <nav className="portfolio-nav" aria-label="Hauptnavigation">
-              <a href="#spielidee">Spielidee</a>
-              <a href="#bretter">Bretter</a>
-              <button type="button" onClick={openShop}>Shop</button>
-              <a href="#arena-profile">Mitspielen</a>
-              <a href="#arena-profile">Profil</a>
+            <nav className="portfolio-nav arena-home-nav" aria-label="Hauptnavigation">
+              <a href="#arena-start">Jetzt spielen</a>
             </nav>
           </header>
 
-          <main className="portfolio-hero" id="spielidee">
+          <main className="portfolio-hero arena-home-hero" id="spielidee">
             <div className="crystal-hero-art" aria-hidden="true">
               <svg viewBox="0 0 180 180" fill="none">
                 <path d="m54 12 68 10 43 48-36 75-53 20-63-62 7-53 34-38Z" fill="url(#hero-gem-fill)" stroke="url(#hero-gem-stroke)" strokeWidth="2" />
@@ -597,86 +593,18 @@ export default function App() {
               <span className="crystal-glint crystal-glint-one" />
               <span className="crystal-glint crystal-glint-two" />
             </div>
-            <div className="portfolio-hero-word">LOS!</div>
-            <div className="portfolio-hero-copy">
-              <span>Dein Zug.</span>
-              <span>Deine Viertel. Deine Strategie.</span>
-              <span>Mach die Stadt zu deiner.</span>
-            </div>
-          </main>
-
-          <section className="portfolio-metrics" aria-label="Spiel auf einen Blick">
-            <div><strong>3</strong><span>Brettgrößen: 40, 80 oder 120 Felder</span></div>
-            <div><strong>20</strong><span>Spieler maximal pro Raum</span></div>
-            <div><strong>2</strong><span>Bauvarianten: klassisch oder schnell</span></div>
-          </section>
-
-          <section className="portfolio-grid" id="bretter">
-            <article className="portfolio-card featured">
-              <span className="card-label">Viertel sichern</span>
-              <h3>Kaufe Grundstücke. Baue deine Stadt.</h3>
-              <p>Sammle passende Grundstücke, errichte Häuser und entwickle dein Viertel Schritt für Schritt.</p>
-            </article>
-
-            <article className="portfolio-card">
-              <span className="card-label">Handel &amp; Taktik</span>
-              <h3>Gute Deals verändern das Spiel.</h3>
-              <p>Tausche Grundstücke, plane deine Züge und behalte dein Spielgeld im Blick.</p>
-            </article>
-
-            <article className="portfolio-card">
-              <span className="card-label">Deine Regeln</span>
-              <h3>Wähle Brett und Bauweise.</h3>
-              <p>Spiele auf 40, 80 oder 120 Feldern. Im schnellen Modus darfst du schon mit zwei passenden Grundstücken bauen.</p>
-            </article>
-          </section>
-
-          <section className="portfolio-showcase">
-            <div className="showcase-header">
-              <span className="portfolio-kicker">Drei Wege in die Stadt</span>
-              <a href="#arena-profile">Spiel starten</a>
-            </div>
-
-            <div className="showcase-list">
-              <div className="showcase-item accent">
-                <span>01</span>
-                <div>
-                  <strong>Altstadt</strong>
-                  <small>40 Felder · der kompakte Einstieg</small>
-                </div>
-              </div>
-              <div className="showcase-item">
-                <span>02</span>
-                <div>
-                  <strong>Hafenviertel</strong>
-                  <small>80 Felder · mehr Raum für deine Strategie</small>
-                </div>
-              </div>
-              <div className="showcase-item">
-                <span>03</span>
-                <div>
-                  <strong>Metropole</strong>
-                  <small>120 Felder · das große Stadtduell</small>
-                </div>
+            <div className="portfolio-hero-copy arena-home-copy">
+              <span className="portfolio-kicker">Kostenloses Browser-Spiel</span>
+              <h1>Dein Stadtspiel.<br />Mit deinen Freunden.</h1>
+              <p>Kaufe Viertel, handle und baue deine Stadt – direkt im Browser.</p>
+              <div className="arena-home-trust" aria-label="Spielvorteile">
+                <span>Kein Download</span>
+                <span>Gastzugang</span>
+                <span>Auch mit Bots</span>
               </div>
             </div>
-          </section>
-
-          <section className="portfolio-panel" id="arena-profile" tabIndex={-1}>
-            <div className="portfolio-panel-header">
-              <span className="portfolio-kicker">Dein Spielprofil</span>
-              <span className="portfolio-status">Ohne Konto direkt mitspielen</span>
-            </div>
-
-            <div className="portfolio-selected-token">
-              <div className="portfolio-token-badge"><TokenArt token={playerToken} /></div>
-              <div>
-                <small>Deine Spielfigur</small>
-                <strong>{tokenLabel(playerToken)}</strong>
-              </div>
-            </div>
-
-            <div className="portfolio-form-grid">
+            <section className="arena-home-start-card" id="arena-start" aria-labelledby="portfolio-start-title">
+              <h2 id="portfolio-start-title">Direkt losspielen</h2>
               <label className="portfolio-field">
                 <span>Dein Spielername</span>
                 <input
@@ -685,9 +613,45 @@ export default function App() {
                   value={playerName}
                   onChange={(e) => setPlayerName(e.target.value)}
                   placeholder="Spielername"
+                  autoComplete="nickname"
                 />
               </label>
+              <button type="button" onClick={handleCreateRoom} className="portfolio-primary">
+                Raum erstellen <ArrowRight size={17} />
+              </button>
+              <div className="portfolio-join-row">
+                <input
+                  type="text"
+                  maxLength={8}
+                  aria-label="Raumcode"
+                  onKeyDown={event => { if (event.key === 'Enter') handleJoinRoom(); }}
+                  value={joinRoomCode}
+                  onChange={(e) => setJoinRoomCode(e.target.value.toUpperCase())}
+                  placeholder="RAUMCODE"
+                />
+                <button type="button" onClick={handleJoinRoom} className="portfolio-secondary">Beitreten</button>
+              </div>
+              <p className="arena-home-start-note">Kein Konto nötig. Erstelle einen Raum oder gib einen Einladungscode ein.</p>
+            </section>
+          </main>
 
+          <section className="portfolio-panel arena-home-panel" id="arena-profile" tabIndex={-1}>
+            <div className="portfolio-panel-header">
+              <span className="portfolio-kicker">Dein Spielstil</span>
+              <span className="portfolio-status">Gastzugang verfügbar</span>
+            </div>
+
+            <div className="portfolio-selected-token">
+              <div className="portfolio-token-badge"><TokenArt token={playerToken} /></div>
+              <div>
+                <small>Aktuelle Spielfigur</small>
+                <strong>{tokenLabel(playerToken)}</strong>
+              </div>
+            </div>
+
+            <details className="arena-home-customization">
+              <summary>Figur und Farbe anpassen</summary>
+              <div className="portfolio-form-grid">
               <div className="portfolio-field">
                 <span>Wähle deine Figur</span>
                 <div className="portfolio-token-grid">
@@ -695,6 +659,7 @@ export default function App() {
                     <button
                       key={token}
                       type="button"
+                      aria-label={tokenLabel(token)}
                       aria-pressed={playerToken === token}
                       onClick={() => {
                         playSound('click');
@@ -714,6 +679,7 @@ export default function App() {
                     <button
                       key={c}
                       type="button"
+                      aria-label={`Farbe ${c}`}
                       aria-pressed={playerColor === c}
                       onClick={() => {
                         playSound('click');
@@ -724,36 +690,24 @@ export default function App() {
                   ))}
                 </div>
               </div>
-            </div>
-
-            <div className="portfolio-actions">
-              <button onClick={handleCreateRoom} className="portfolio-primary">Raum erstellen <ArrowRight size={17} /></button>
-              <div className="portfolio-join-row">
-                <input
-                  type="text"
-                  maxLength={8}
-                  aria-label="Raumcode"
-                  onKeyDown={event => { if (event.key === 'Enter') handleJoinRoom(); }}
-                  value={joinRoomCode}
-                  onChange={(e) => setJoinRoomCode(e.target.value.toUpperCase())}
-                  placeholder="RAUMCODE"
-                />
-                <button onClick={handleJoinRoom} className="portfolio-secondary">Beitreten</button>
               </div>
-            </div>
+            </details>
 
             <div className="portfolio-bottom-actions">
-              <button onClick={handleQuickPlay} className="portfolio-ghost"><Zap size={15} /> Schnellspiel mit Bots</button>
-              <button onClick={() => { playSound('click'); setIsLeaderboardOpen(true); }} className="portfolio-ghost subtle"><Trophy size={15} /> Bestenliste</button>
+              <button type="button" onClick={handleQuickPlay} className="portfolio-ghost"><Zap size={15} /> Schnellspiel mit Bots</button>
+              <button type="button" onClick={() => { playSound('click'); setIsLeaderboardOpen(true); }} className="portfolio-ghost subtle"><Trophy size={15} /> Bestenliste</button>
             </div>
             <AccountPanel guestReady={guestReady} onAccountChange={setAccountProfile} onOpenShop={openShop} />
           </section>
 
-          <footer className="portfolio-footer">
+          <footer className="portfolio-footer arena-home-footer">
             <div>
               <span>Würfle. Handle. Bau dein Viertel.</span>
             </div>
-            <a href="#arena-profile">Jetzt mitspielen <ArrowRight size={15} /></a>
+            <div className="arena-home-footer-actions">
+              <button type="button" onClick={openShop}>Shop</button>
+              <a href="#arena-start">Zum Spiel <ArrowRight size={15} /></a>
+            </div>
           </footer>
         </div>
       )}

@@ -1,11 +1,12 @@
 import { BOARD_SIZE_OPTIONS, getBoardTiles } from '../../src/data/boardVariants.js';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
-import { eq, desc, sql } from 'drizzle-orm';
+import { and, eq, desc, gt, sql } from 'drizzle-orm';
 import { database } from '../../db/index.js';
 import { accountSessions, rooms, scores } from '../../db/schema.js';
 import { GameEngine } from '../../src/game/GameEngine.js';
 import { AVAILABLE_TOKENS, PLAYER_COLORS, MAX_PLAYERS, ROUND_LIMIT_OPTIONS, TURN_LIMIT_OPTIONS } from '../../src/data/monopolyBoard.js';
 import { MAX_GAME_LOGS } from '../../src/game/GameEngine.js';
+import { isRankedGame, publicPlayerName, toPublicRankedLeaderboardRecord } from '../../src/lib/leaderboard.js';
 import { isBotDifficulty, type BotDifficulty, type Player, type LobbyRoom } from '../../src/types/game.js';
 import handleLocalGame from './_shared/localGame.mjs';
 import { canSkipUnchangedPoll } from './_shared/polling.mjs';
@@ -59,6 +60,21 @@ const getRateLimitKey = (req: Request) => {
   return forwarded || 'unknown';
 };
 
+async function resolvePlayerId(db: ReturnType<typeof database>, accountToken: string | null, guestPlayerId: string) {
+  if (!accountToken) return { playerId: guestPlayerId, expiredAccountSession: false };
+  const [accountSession] = await db.select().from(accountSessions).where(eq(
+    accountSessions.tokenHash,
+    createHash('sha256').update(accountToken).digest('hex'),
+  )).limit(1);
+  if (accountSession && accountSession.expiresAt > new Date()) {
+    return { playerId: accountSession.playerId, expiredAccountSession: false };
+  }
+  return { playerId: guestPlayerId, expiredAccountSession: true };
+}
+
+const expiredAccountCookie = (req: Request) =>
+  `arena_session=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0${new URL(req.url).protocol === 'https:' ? '; Secure' : ''}`;
+
 const enforceRateLimit = (req: Request) => {
   const key = `${req.method}:${getRateLimitKey(req)}`;
   const now = Date.now();
@@ -96,12 +112,23 @@ export default async (req: Request) => {
     headers.set('Set-Cookie', `monopoly_session=${session}; Path=/; HttpOnly; SameSite=Strict; Max-Age=31536000${new URL(req.url).protocol === 'https:' ? '; Secure' : ''}`);
   }
   const guestPlayerId = createHash('sha256').update(session).digest('hex');
-  const accountToken = req.headers.get('cookie')?.match(/(?:^|; )arena_session=([a-f0-9]{64})(?:;|$)/)?.[1];
+  const accountToken = req.headers.get('cookie')?.match(/(?:^|; )arena_session=([a-f0-9]{64})(?:;|$)/)?.[1] ?? null;
   let playerId = guestPlayerId;
   const respond = (body: unknown, status = 200) => Response.json(body, { status, headers });
   try {
     if (req.method === 'GET') {
-      return respond(await database().select().from(scores).orderBy(desc(scores.wins), desc(scores.totalCashEarned)).limit(10));
+      const db = database();
+      const identity = await resolvePlayerId(db, accountToken, guestPlayerId);
+      playerId = identity.playerId;
+      if (identity.expiredAccountSession) headers.append('Set-Cookie', expiredAccountCookie(req));
+      const [records, [playerRecord]] = await Promise.all([
+        db.select().from(scores).where(gt(scores.rankedGamesPlayed, 0)).orderBy(desc(scores.rankedWins), desc(scores.rankedGamesPlayed)).limit(10),
+        db.select().from(scores).where(and(eq(scores.id, playerId), gt(scores.rankedGamesPlayed, 0))).limit(1),
+      ]);
+      return respond({
+        entries: records.map(toPublicRankedLeaderboardRecord),
+        player: playerRecord ? toPublicRankedLeaderboardRecord(playerRecord) : null,
+      });
     }
     if (req.method !== 'POST') return respond({ success: false, error: 'Method not allowed' }, 405);
     if (req.headers.get('origin') && req.headers.get('origin') !== new URL(req.url).origin) return respond({ success: false, error: 'Invalid origin' }, 403);
@@ -114,14 +141,9 @@ export default async (req: Request) => {
     const { event, data = {} } = await req.json();
     if (event === 'session' && !accountToken) return respond({ success: true, playerId });
     const db = database();
-    if (accountToken) {
-      const [accountSession] = await db.select().from(accountSessions).where(eq(
-        accountSessions.tokenHash,
-        createHash('sha256').update(accountToken).digest('hex'),
-      )).limit(1);
-      if (accountSession && accountSession.expiresAt > new Date()) playerId = accountSession.playerId;
-      else headers.append('Set-Cookie', `arena_session=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0${new URL(req.url).protocol === 'https:' ? '; Secure' : ''}`);
-    }
+    const identity = await resolvePlayerId(db, accountToken, guestPlayerId);
+    playerId = identity.playerId;
+    if (identity.expiredAccountSession) headers.append('Set-Cookie', expiredAccountCookie(req));
     if (event === 'session') return respond({ success: true, playerId });
     await cleanupRooms(db);
     const makePlayer = (lobbyPlayers: Player[], bot = false): Player => ({
@@ -319,15 +341,32 @@ export default async (req: Request) => {
       if (changed) {
         if (engine?.getState().phase === 'GAME_OVER' && row.engine?.state.phase !== 'GAME_OVER') {
           const state = engine.getState();
-          for (const p of state.players.filter(p => !p.isBot)) {
-            const won = p.id === state.winnerId;
-            const worth = p.money + Object.values(state.properties).filter(prop => prop.ownerId === p.id).reduce((sum, prop) => {
-              const tile = getBoardTiles(state.boardSize)[prop.tileId];
-              return sum + (tile?.price || 0) + prop.houses * (tile?.houseCost || 0) + (prop.landmark ? 3 * (tile?.houseCost || 0) : 0);
-            }, 0);
-            await tx.insert(scores).values({ id: p.id, username: p.name, wins: won ? 1 : 0, gamesPlayed: 1, totalCashEarned: won ? Math.max(0, worth) : 0 }).onConflictDoUpdate({ target: scores.id, set: {
-              username: p.name, wins: sql`${scores.wins} + ${won ? 1 : 0}`, gamesPlayed: sql`${scores.gamesPlayed} + 1`, totalCashEarned: sql`${scores.totalCashEarned} + ${won ? Math.max(0, worth) : 0}`, updatedAt: new Date(),
-            } });
+          if (isRankedGame(state.players, state.winnerId)) {
+            for (const p of state.players) {
+              const won = p.id === state.winnerId;
+              const worth = p.money + Object.values(state.properties).filter(prop => prop.ownerId === p.id).reduce((sum, prop) => {
+                const tile = getBoardTiles(state.boardSize)[prop.tileId];
+                return sum + (tile?.price || 0) + prop.houses * (tile?.houseCost || 0) + (prop.landmark ? 3 * (tile?.houseCost || 0) : 0);
+              }, 0);
+              const username = publicPlayerName(p.id);
+              await tx.insert(scores).values({
+                id: p.id,
+                username,
+                wins: won ? 1 : 0,
+                gamesPlayed: 1,
+                totalCashEarned: won ? Math.max(0, worth) : 0,
+                rankedWins: won ? 1 : 0,
+                rankedGamesPlayed: 1,
+              }).onConflictDoUpdate({ target: scores.id, set: {
+                username,
+                wins: sql`${scores.wins} + ${won ? 1 : 0}`,
+                gamesPlayed: sql`${scores.gamesPlayed} + 1`,
+                totalCashEarned: sql`${scores.totalCashEarned} + ${won ? Math.max(0, worth) : 0}`,
+                rankedWins: sql`${scores.rankedWins} + ${won ? 1 : 0}`,
+                rankedGamesPlayed: sql`${scores.rankedGamesPlayed} + 1`,
+                updatedAt: new Date(),
+              } });
+            }
           }
         }
         await tx.update(rooms).set({ lobby, engine: engine?.snapshot() || null, revision: row.revision + 1, updatedAt: new Date() }).where(eq(rooms.id, roomId));

@@ -5,7 +5,7 @@
 3. **Verlässliche Räume bis 20 Spieler:** Bestehende Netlify-Datenbankanbindung, Sitzungssicherheit und atomare Spielaktionen prüfen und härten. Gleichzeitige Beitritte, volle Räume, Wiederverbindung und Zustandsrevisionen unter Last testen. Einladungen und Übernahme des Hosts bei Ausfällen absichern.
 4. **Strategische Bots:** Schwierigkeitsstufen und nachvollziehbare Entscheidungen für Käufe, Liquiditätsreserve, Bauen, Hypotheken und Handel entwickeln. Deterministische Simulationen mit verschiedenen Spielerzahlen und beiden Brettern ergänzen.
 5. **Abwechslung und Balance (umgesetzt):** Auktionen, Stadtereignisse, Missionen, Belohnungen und Gebäude-Upgrades als optionale Regeln ergänzen. Rundenlimit und begrenzte Aufholhilfe sind in der Lobby wählbar; bestehende Standardregeln bleiben unverändert.
-6. **Erfolge und Ranglisten:** Bestehende Rangliste prüfen und um nachvollziehbare Ergebnisse, Erfolge und Schutz gegen manipulierte Ergebnisse ergänzen.
+6. **Erfolge und Ranglisten (implementiert):** Rangliste und Erfolge beruhen auf serverseitig bestätigten Partien ohne Bots. Bestehende, nicht verifizierbare Werte werden nicht als gewertet angezeigt.
 7. **Freigabe und Gesamtarchiv:** Regeltests, Bot-Simulationen, Browserprüfungen beider Brettvarianten und Lastprüfungen mit 20 Spielern durchführen. Typecheck und Build in der Pipeline auswerten. Neues vollständiges ZIP und detaillierten Prüfbericht bereitstellen.
 
 Jeder Meilenstein erhält eigene überprüfbare Abnahmekriterien. Keine Originaldateien, Grafiken, Texturen, Modi oder Funktionen löschen. Änderungen gezielt ergänzen; Backend und Spiellogik werden in dieser Oberflächenetappe nicht umgebaut.
@@ -124,3 +124,23 @@ Abnahme lokal: `npm test` (87 Tests), `npm run lint`, `npm run build` und `git d
 ## Benutzerdefiniertes 3D-Brett
 
 Das vom Nutzer bereitgestellte `arena_board_v2.glb` wird in der klassischen 40-Felder-Three.js-Ansicht als Brettmodell geladen. Die vorhandenen Felder bleiben anklickbar; Spielfiguren, Besitzmarker und Gebäude werden weiterhin aus dem Spielstand erzeugt. Bis das Modell geladen ist oder falls es nicht geladen werden kann, bleibt die bisherige prozedurale Ansicht als Ersatz erhalten. Die 80-/120-Felder-Ansichten und Spielregeln bleiben unberührt. Das GLB ist 16.406.740 Byte groß; Herkunft und kommerzielle Nutzungsrechte des Modells wurden nicht unabhängig geprüft.
+
+Die Shop-Vorschau verwendet dasselbe Blender-Brett, dreht es standardmäßig langsam und bietet eine Start-/Pause-Schaltfläche. Bei aktivierter Betriebssystem-Einstellung „Bewegung reduzieren“ startet die Drehung pausiert. Die bisherige prozedurale Shop-Vorschau bleibt als Rückfall erhalten.
+
+## Kompaktere Lobby
+
+Die Lobby zeigt Bereitschaft, Raumgröße und Zeitlimit knapper an. Wiederholte Spielzusammenfassungen und lange Regelhinweise wurden gekürzt; Spielerstatus, Einladungen, Profilbearbeitung und alle Raumoptionen bleiben erhalten.
+
+## CRO-Startseite und direkter Spieleinstieg
+
+Die Startseite führt jetzt mit einem deutschsprachigen Nutzenversprechen direkt zu Spielername, Raum-Erstellung und Raumcode-Beitritt. Technische Kennzahlen, Brettgrößen-Übersicht und die drei Vorteilskarten wurden aus dem Startbildschirm genommen; die Brettauswahl in der Lobby bleibt bestehen. Auf breiten Bildschirmen teilen sich Einstieg und Profil dieselbe maximale Breite; Profilaktionen und Konto stehen nebeneinander. Auf schmalen Bildschirmen werden die Bereiche gestapelt. Figur- und Farbauswahl, Rangliste, Konto und Shop bleiben erreichbar. Es wurden keine Spielerzahlen oder künstliche Verknappung ergänzt.
+
+Prüfstatus: TypeScript-Prüfung (`npm run lint`) und `git diff --check` bestanden. Die Startseite wurde in der lokalen Vorschau auf Desktop und Mobilgeräten visuell geprüft; dabei wurde ein horizontal überlaufendes Eingabefeld korrigiert. Backend-Funktionen waren in der Vorschau nicht erreichbar, daher wurden Raumerstellung, Beitritt und Konto nicht funktional getestet. Kein Spieltest und kein Build ausgeführt.
+
+## Etappe 6 – Verifizierte Rangliste und Erfolge
+
+Gewertet werden nur abgeschlossene Partien mit mindestens zwei menschlichen Teilnehmenden und ohne Bots; ein menschlicher Sieger muss im Spielstand stehen. Die Prüfung und Zählung erfolgen serverseitig beim einmaligen Übergang zum Spielende. Das gilt auch für den lokalen Netlify-Fallback. Frei gewählte Namen werden in der öffentlichen Rangliste durch einen stabilen, anonymen Spielernamen ersetzt.
+
+Die Rangliste verwendet neue Zähler für Siege und gewertete Partien. Eine additive Migration legt diese mit null an; vorhandene, nicht verifizierbare Ranglistenwerte und Namen bleiben in der Datenbank erhalten, werden aber nicht als gewertete Ergebnisse angezeigt. Fünf Erfolge werden nachvollziehbar aus diesen Zählern abgeleitet. Das Ranglistenfenster zeigt die eigenen Erfolge und die zehn besten anonymen Einträge; bei Gleichstand entscheidet die Zahl der gewerteten Partien.
+
+Prüfstatus: TypeScript-Prüfung (`npm run lint`), vier gezielte Ranglistentests und `git diff --check` bestanden. Die Migration wurde nicht auf eine echte Netlify-Datenbank angewendet; produktive Ranglisten- und Mehrspielerabläufe wurden nicht getestet. Kein Build ausgeführt.

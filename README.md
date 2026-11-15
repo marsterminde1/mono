@@ -8,11 +8,17 @@ Verwendet werden Vite, React, Tailwind CSS, Three.js, Netlify Functions und die 
 
 Abhängigkeiten mit `npm install` installieren. Mit `netlify dev --port 8889` die Anwendung einschließlich Funktions-Emulation starten. Die bestehende Datenbankkonfiguration benötigt eine mit dem Netlify-Projekt verknüpfte Umgebung. Keine Zugangsdaten in Dateien eintragen.
 
-Vorhandene Prüfskripte: `npm test`, `npm run lint` (Typecheck), `npm run build`. Für das Brett-Upgrade bestanden 40 automatisierte Tests und der Typecheck. Zusätzlich wurden Komponenten mit React serverseitig probeweise gerendert (Browser-Standort simuliert). Ein lokaler Build und echte Browser-/Netzwerklasttests wurden nicht ausgeführt; die Bereitstellungspipeline übernimmt die Build-Prüfung.
+Vorhandene Prüfskripte: `npm test`, `npm run lint` (Typecheck), `npm run build`. Zuletzt am 15.11.2026 geprüft: alle 91 Tests, der Typecheck und der lokale Produktionsbuild waren erfolgreich. Ein Netlify-Deploy, eine echte Verbindung zur Netlify Database und OAuth-Anmeldung wurden dabei nicht geprüft.
+
+## Auf Netlify bereitstellen
+
+Das GitHub-Repository in Netlify als neue Website verbinden. `netlify.toml` legt den Build-Befehl, den Veröffentlichungsordner `dist` und den Functions-Ordner fest. Für echte Spielräume muss in Netlify eine Netlify Database mit der Website verbunden sein. SQL-Migrationen unter `netlify/database/migrations/` werden von Netlify beim Deploy automatisch angewendet; ein manuelles Einspielen ist dafür nicht nötig. Das gilt nicht für lokale Vorschauen ohne verbundene Netlify-Umgebung.
+
+Google-Anmeldung benötigt die passenden OAuth-Umgebungsvariablen in den Website-Einstellungen von Netlify. Zugangsdaten gehören nicht ins GitHub-Repository. Siehe auch die [offizielle Anleitung zu Netlify Database](https://docs.netlify.com/build/data-and-storage/netlify-database/).
 
 ## Konten, Mitgliedschaften und Werbung
 
-Die Google-Anmeldung, der Datenexport, die Kontolöschung sowie die vorbereitete Free-/Plus-/Pro-Produktstruktur sind unter [docs/accounts-and-monetization.md](docs/accounts-and-monetization.md) beschrieben. Google-OAuth, die neue Datenbankmigration und eine spätere CMP-/AdSense-Konfiguration benötigen Umgebungsvariablen; ohne diese bleiben Anmeldung und Anzeigen inaktiv. Zahlungsanbieter, Preise und echte Checkout-/Webhook-Verarbeitung sind noch nicht eingerichtet.
+Die Google-Anmeldung, der Datenexport, die Kontolöschung sowie die vorbereitete Free-/Plus-/Pro-Produktstruktur sind unter [docs/accounts-and-monetization.md](docs/accounts-and-monetization.md) beschrieben. Google-OAuth und eine spätere CMP-/AdSense-Konfiguration benötigen Umgebungsvariablen; ohne OAuth-Konfiguration bleibt die Anmeldung inaktiv. Zahlungsanbieter, Preise und echte Checkout-/Webhook-Verarbeitung sind noch nicht eingerichtet.
 
 ## Weiterentwicklung
 

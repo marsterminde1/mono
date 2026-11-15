@@ -14,6 +14,8 @@ export const scores = pgTable('game_scores', {
   wins: integer().notNull().default(0),
   gamesPlayed: integer('games_played').notNull().default(0),
   totalCashEarned: integer('total_cash_earned').notNull().default(0),
+  rankedWins: integer('ranked_wins').notNull().default(0),
+  rankedGamesPlayed: integer('ranked_games_played').notNull().default(0),
   updatedAt: timestamp('updated_at').notNull().defaultNow(),
 });
 

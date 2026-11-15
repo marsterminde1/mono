@@ -1,15 +1,21 @@
 import { useEffect, useRef, useState } from 'react';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 
 export function StoreBoardModel() {
   const hostRef = useRef<HTMLDivElement>(null);
   const [failed, setFailed] = useState(false);
+  const [modelLoadFailed, setModelLoadFailed] = useState(false);
+  const [isRotating, setIsRotating] = useState(() => !window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+  const isRotatingRef = useRef(isRotating);
+  isRotatingRef.current = isRotating;
 
   useEffect(() => {
     const host = hostRef.current;
     if (!host) return;
 
+    let disposed = false;
     let renderer: THREE.WebGLRenderer;
     try {
       renderer = new THREE.WebGLRenderer({ alpha: true, antialias: true });
@@ -26,8 +32,7 @@ export function StoreBoardModel() {
     controls.enableDamping = true;
     controls.minDistance = 8;
     controls.maxDistance = 14;
-    controls.autoRotate = !window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-    controls.autoRotateSpeed = 0.32;
+    controls.autoRotate = false;
 
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
     renderer.setClearColor(0x000000, 0);
@@ -57,6 +62,7 @@ export function StoreBoardModel() {
     };
     const board = new THREE.Group();
     scene.add(board);
+    let displayBoard: THREE.Object3D = board;
 
     const addBox = (
       parent: THREE.Object3D,
@@ -188,6 +194,61 @@ export function StoreBoardModel() {
     });
     board.add(dice);
 
+    const disposeObjectResources = (root: THREE.Object3D) => {
+      root.traverse(object => {
+        if (!(object instanceof THREE.Mesh)) return;
+        object.geometry.dispose();
+        const meshMaterials = Array.isArray(object.material) ? object.material : [object.material];
+        meshMaterials.forEach(meshMaterial => {
+          Object.values(meshMaterial).forEach(value => {
+            if (value instanceof THREE.Texture) value.dispose();
+          });
+          meshMaterial.dispose();
+        });
+      });
+    };
+
+    new GLTFLoader().load(
+      new URL('../../arena_board_v2.glb', import.meta.url).href,
+      gltf => {
+        const model = gltf.scene;
+        if (disposed) {
+          disposeObjectResources(model);
+          return;
+        }
+
+        model.scale.setScalar(3.8 / 4.267578125);
+        model.updateMatrixWorld(true);
+        const bounds = new THREE.Box3().setFromObject(model);
+        const center = bounds.getCenter(new THREE.Vector3());
+        model.position.x -= center.x;
+        model.position.y += 0.39 - bounds.max.y;
+        model.position.z -= center.z;
+        model.updateMatrixWorld(true);
+        model.traverse(object => {
+          if (object instanceof THREE.Mesh) {
+            object.castShadow = true;
+            object.receiveShadow = true;
+          }
+        });
+
+        const pivot = new THREE.Group();
+        pivot.add(model);
+        scene.add(pivot);
+        scene.remove(board);
+        disposeObjectResources(board);
+        materials.clear();
+        displayBoard = pivot;
+        setModelLoadFailed(false);
+      },
+      undefined,
+      error => {
+        if (disposed) return;
+        console.error('Das Blender-Brett konnte im Shop nicht geladen werden; die Ersatzvorschau bleibt aktiv.', error);
+        setModelLoadFailed(true);
+      }
+    );
+
     const resize = () => {
       const width = Math.max(1, host.clientWidth);
       const height = Math.max(1, host.clientHeight);
@@ -200,22 +261,25 @@ export function StoreBoardModel() {
     resize();
 
     let frame = 0;
+    let lastFrameTime = performance.now();
     const animate = () => {
       frame = requestAnimationFrame(animate);
+      const currentTime = performance.now();
+      const delta = Math.min((currentTime - lastFrameTime) / 1000, 0.1);
+      lastFrameTime = currentTime;
       controls.update();
+      if (isRotatingRef.current) displayBoard.rotation.y += delta * 0.24;
       renderer.render(scene, camera);
     };
     animate();
 
     return () => {
+      disposed = true;
       cancelAnimationFrame(frame);
       observer.disconnect();
       controls.dispose();
-      scene.traverse(object => {
-        if (object instanceof THREE.Mesh) object.geometry.dispose();
-      });
+      disposeObjectResources(scene);
       materials.forEach(item => item.dispose());
-      titleTexture.dispose();
       renderer.dispose();
       renderer.domElement.remove();
     };
@@ -225,6 +289,15 @@ export function StoreBoardModel() {
     <div className="district-board-model" role="img" aria-label="Interaktives 3D-Modell eines eigenen Stadtbrettspiels">
       <div className="district-board-glow" aria-hidden="true" />
       <div className="district-board-canvas" ref={hostRef} />
+      <button
+        type="button"
+        className="district-board-rotate"
+        aria-pressed={isRotating}
+        onClick={() => setIsRotating(rotating => !rotating)}
+      >
+        {isRotating ? 'Drehung pausieren' : '3D-Modell drehen'}
+      </button>
+      {modelLoadFailed && <span className="district-board-model-note" role="status">Die Ersatzvorschau ist aktiv.</span>}
       {failed && <div className="district-board-fallback">Eine eigene Stadt. Ein Spielzug kann alles ändern.</div>}
       <span className="district-board-label">ARENA DISTRICTS / CITY TABLE 01</span>
     </div>
