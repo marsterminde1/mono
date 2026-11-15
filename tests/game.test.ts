@@ -13,10 +13,12 @@ const stepBotOrAuction = (engine: GameEngine) => {
 test('saving and restoring preserves ownership, players, turn and card decks', () => {
   const engine = game();
   engine.getState().properties[1].ownerId = 'a';
+  engine.getState().matchMissions!.a.completed.push('buy_property');
   engine.rollDice('a');
   const snapshot = JSON.parse(JSON.stringify(engine.snapshot()));
   const restored = GameEngine.restore(snapshot);
   assert.deepEqual(restored.snapshot(), snapshot);
+  assert.deepEqual(restored.getState().matchMissions?.a?.completed, ['buy_property']);
   assert.equal(restored.rollDice('b').success, false);
 });
 test('game logs are trimmed to a bounded size', () => {
@@ -26,6 +28,61 @@ test('game logs are trimmed to a bounded size', () => {
   }
   assert.equal(engine.getState().logs.length, MAX_GAME_LOGS);
   assert.match(engine.getState().logs.at(-1)!.message, /log \d+/);
+});
+
+test('buying a property completes one match mission and pays the bonus only once', () => {
+  const engine = game();
+  const state = engine.getState();
+  const tile = getBoardTiles(40)[1];
+  state.players[0].position = tile.id;
+  state.phase = 'ACTION';
+
+  assert.equal(engine.buyProperty('a', tile.id).success, true);
+  assert.equal(state.players[0].money, 1500 - tile.price! + 50);
+  assert.deepEqual(state.matchMissions?.a?.completed, ['buy_property']);
+
+  const secondTile = getBoardTiles(40)[3];
+  state.players[0].position = secondTile.id;
+  state.phase = 'ACTION';
+  const beforeSecondPurchase = state.players[0].money;
+  assert.equal(engine.buyProperty('a', secondTile.id).success, true);
+  assert.equal(state.players[0].money, beforeSecondPurchase - secondTile.price!);
+  assert.deepEqual(state.matchMissions?.a?.completed, ['buy_property']);
+});
+
+test('winning an auction can complete the property mission', () => {
+  const engine = game();
+  const state = engine.getState();
+  state.players[0].position = 1;
+  state.phase = 'ACTION';
+  assert.equal(engine.declineProperty('a').success, true);
+  assert.equal(engine.bidOnAuction('a', 10).success, true);
+  const endsAt = state.auction!.endsAt;
+
+  assert.equal(engine.auctionStep(endsAt), true);
+  assert.equal(state.properties[1].ownerId, 'a');
+  assert.equal(state.players[0].money, 1500 - 10 + 50);
+  assert.deepEqual(state.matchMissions?.a?.completed, ['buy_property']);
+});
+
+test('building earns the mission bonus once and passing GO completes its mission', () => {
+  const engine = new GameEngine('MISSIONS', [player('a'), player('b')], { propertyBuildMode: 'quick' });
+  const state = engine.getState();
+  const tile = getBoardTiles(40)[1];
+  const group = propertyGroup(tile.color!, tile.id);
+  group.forEach(id => { state.properties[id].ownerId = 'a'; });
+  state.players[0].money = 1000;
+
+  assert.equal(engine.buildHouse('a', group[0]).success, true);
+  assert.equal(engine.buildHouse('a', group[1]).success, true);
+  assert.equal(state.players[0].money, 1000 - 2 * tile.houseCost! + 50);
+  assert.deepEqual(state.matchMissions?.a?.completed, ['build_house']);
+
+  state.players[0].position = 39;
+  state.phase = 'ROLL';
+  assert.equal(engine.rollDice('a').success, true);
+  assert.ok(state.matchMissions?.a?.completed.includes('pass_go'));
+  assert.ok(state.logs.some(entry => entry.message.includes('Mission „Runde drehen“')));
 });
 
 test('quick build mode allows early growth on a 3-property color group', () => {
@@ -163,7 +220,7 @@ test('first accepted competing bid stays ahead; winner pays only when auction en
   assert.equal(engine.auctionStep(endsAt), true);
   assert.equal(state.phase, 'END_TURN');
   assert.equal(state.properties[1].ownerId, 'b');
-  assert.equal(state.players[1].money, 1480);
+  assert.equal(state.players[1].money, 1530);
 });
 
 test('auction expiry without bids leaves the property with the bank', () => {
@@ -290,10 +347,10 @@ test('building subsidy discounts only the first house built in that round', () =
   state.players[0].money = 1000;
   const houseCost = getBoardTiles(40)[group[0]].houseCost!;
   assert.equal(engine.buildHouse('a', group[0]).success, true);
-  assert.equal(state.players[0].money, 1000 - houseCost + 25);
+  assert.equal(state.players[0].money, 1000 - houseCost + 25 + 50);
   assert.equal(state.cityEventBuildDiscounts?.a, 0);
   assert.equal(engine.buildHouse('a', group[1]).success, true);
-  assert.equal(state.players[0].money, 1000 - houseCost * 2 + 25);
+  assert.equal(state.players[0].money, 1000 - houseCost * 2 + 25 + 50);
 });
 
 test('legacy snapshots receive a safe city event vote state', () => {
@@ -304,11 +361,13 @@ test('legacy snapshots receive a safe city event vote state', () => {
   delete snapshot.state.activeCityEvent;
   delete snapshot.state.cityEventBuildDiscounts;
   delete snapshot.state.propertyUpgradeMode;
+  delete snapshot.state.matchMissions;
   const restored = GameEngine.restore(snapshot);
   assert.equal(restored.getState().roundNumber, 1);
   assert.equal(restored.getState().roundStartPlayerId, 'a');
   assert.equal(restored.getState().cityEventVote?.forRound, 2);
   assert.equal(restored.getState().propertyUpgradeMode, 'standard');
+  assert.deepEqual(restored.getState().matchMissions?.a?.completed, []);
 });
 
 test('negative trades and changed ownership cannot transfer cash or assets', () => {

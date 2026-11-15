@@ -38,16 +38,29 @@ test('local in-memory server creates a room, starts a bot game, and serves the s
   const botResponse = await post('lobby:add_bot', roomData, sessionCookie);
   assert.equal((await botResponse.json() as { success: boolean }).success, true);
   const startResponse = await post('game:start', roomData, sessionCookie);
-  const started = await startResponse.json() as { success: boolean; gameState: { phase: string; players: Array<{ id: string; isBot?: boolean }> } };
+  const started = await startResponse.json() as {
+    success: boolean;
+    gameState: {
+      phase: string;
+      players: Array<{ id: string; isBot?: boolean }>;
+      matchMissions?: Record<string, { completed: string[] }>;
+    };
+  };
   assert.equal(started.success, true);
   assert.equal(started.gameState.players.length, 2);
   assert.ok(started.gameState.players.some(player => player.id === session.playerId));
   assert.ok(started.gameState.players.some(player => player.isBot));
+  assert.equal(Object.keys(started.gameState.matchMissions ?? {}).length, 2);
+  assert.deepEqual(started.gameState.matchMissions?.[session.playerId]?.completed, []);
 
   const pollResponse = await post('room:poll', roomData, sessionCookie);
-  const polled = await pollResponse.json() as { success: boolean; gameState: { phase: string } };
+  const polled = await pollResponse.json() as {
+    success: boolean;
+    gameState: { phase: string; matchMissions?: Record<string, { completed: string[] }> };
+  };
   assert.equal(polled.success, true);
   assert.equal(polled.gameState.phase, started.gameState.phase);
+  assert.deepEqual(polled.gameState.matchMissions?.[session.playerId]?.completed, []);
 });
 
 test('city event votes are accepted and returned to other players by local game requests', async () => {

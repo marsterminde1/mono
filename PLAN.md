@@ -102,3 +102,11 @@ Die Lobby bietet neben dem Standardausbau den optionalen Wahrzeichen-Modus. Ein 
 Besitzverwaltung, Vermögensanzeige, 2D-/3D-Bretter und Grundstücksvorschau kennzeichnen das Upgrade. Grundstücke mit Gebäuden bleiben wie bisher nicht handelbar oder beleihbar; ein Bankrott gibt das Wahrzeichen zusammen mit dem Grundstück frei.
 
 Abnahme lokal: 80 Tests, Typecheck (`npm run lint`), Build (`npm run build`) und `git diff --check` bestanden. Keine echte Netlify-Datenbank, Browser-/Mobilansicht, Netzwerk-Mehrspieler- oder menschliche Balance-Prüfung wurde durchgeführt. Der Build weist weiterhin auf `__dirname` in der Vite-Konfiguration und ein großes JavaScript-Bundle hin. Missionen/Belohnungen und Zeit-/Aufholregeln bleiben für spätere Teilschritte offen.
+
+## Etappe 5.3 – Missionen mit Spielgeld-Boni pro Partie (15. November 2026)
+
+Alle Mitspielenden erhalten in jeder Partie dieselben drei Missionen: ein Grundstück kaufen oder ersteigern, ein Haus oder Hotel bauen und einmal den LOS-Bonus erhalten. Jede Aufgabe gibt automatisch einmalig $50 Spielgeld; es gibt keinen Kauf, keine tägliche Anmeldepflicht und keinen dauerhaften Kontofortschritt. Bots erhalten dieselben Aufgaben. Die Fortschritte liegen im serverautoritativen Spielstand, werden mit Raum-Snapshots gespeichert und bei alten Spielständen ohne Missionsdaten leer initialisiert. Es wurden keine Datenbankmigrationen ergänzt.
+
+Das Spielpanel zeigt erledigte und offene Missionen im Spielerbereich. Grundstückskäufe über Auktionen und normale Käufe zählen gleichermaßen; das Bonusgeld wird nicht mehrfach ausgezahlt.
+
+Prüfstand: `npm test`, `npm run lint`, `npm run build` und `git diff --check` wurden ausgeführt. Der Build weist weiterhin auf `__dirname` in der Vite-Konfiguration und ein großes JavaScript-Bundle hin. Eine echte Netlify-Datenbank, visuelle Browser-/Mobilansicht, Netzwerk-Mehrspielerrunde und menschliche Balance-Prüfung wurden nicht durchgeführt. Zeit-/Aufholregeln bleiben offen.

@@ -141,6 +141,12 @@ export interface ActiveCityEvent {
   round: number;
 }
 
+export type MatchMissionId = 'buy_property' | 'build_house' | 'pass_go';
+
+export interface PlayerMatchMissions {
+  completed: MatchMissionId[];
+}
+
 export interface GameLogEntry {
   playerId?: string;
   participantIds?: string[];
@@ -182,6 +188,7 @@ export interface GameState {
   cityEventVote?: CityEventVote | null;
   activeCityEvent?: ActiveCityEvent | null;
   cityEventBuildDiscounts?: Record<string, number>;
+  matchMissions?: Record<string, PlayerMatchMissions>;
   logs: GameLogEntry[];
   winnerId?: string;
   lastActionPrompt?: string;

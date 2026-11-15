@@ -9,6 +9,7 @@ import {
   GameLogEntry,
   GamePhase,
   GameState,
+  MatchMissionId,
   Player,
   PropertyAuction,
   PropertyUpgradeMode,
@@ -19,6 +20,7 @@ import {
 import { playerReferences } from '../utils/playerReferences';
 import type { PropertyBuildMode } from '../types/game';
 import { CITY_EVENTS } from '../data/cityEvents';
+import { MATCH_MISSIONS } from '../data/matchMissions';
 
 export const MAX_GAME_LOGS = 200;
 
@@ -82,6 +84,7 @@ export class GameEngine {
       cityEventVote: null,
       activeCityEvent: null,
       cityEventBuildDiscounts: {},
+      matchMissions: Object.fromEntries(players.map(player => [player.id, { completed: [] }])),
       freeParkingPot: 100,
       turnSeconds: options.turnSeconds ?? 25,
     };
@@ -110,6 +113,8 @@ export class GameEngine {
       cityEventVote: snapshot.state.cityEventVote ?? null,
       activeCityEvent: snapshot.state.activeCityEvent ?? null,
       cityEventBuildDiscounts: snapshot.state.cityEventBuildDiscounts ?? {},
+      matchMissions: snapshot.state.matchMissions
+        ?? Object.fromEntries(snapshot.state.players.map(player => [player.id, { completed: [] }])),
     };
     if (!engine.state.cityEventVote && engine.state.phase !== 'GAME_OVER') {
       engine.state.cityEventVote = engine.createCityEventVote((engine.state.roundNumber ?? 1) + 1);
@@ -179,6 +184,23 @@ export class GameEngine {
     };
     this.state.logs.push(entry);
     this.state.logs = trimGameLogs(this.state.logs);
+  }
+
+  private completeMission(player: Player, missionId: MatchMissionId): void {
+    const mission = MATCH_MISSIONS.find(candidate => candidate.id === missionId);
+    const playerMissions = this.state.matchMissions?.[player.id];
+    if (!mission || !playerMissions || player.bankrupt || this.state.phase === 'GAME_OVER'
+      || playerMissions.completed.includes(missionId)) return;
+
+    playerMissions.completed.push(missionId);
+    player.money += mission.reward;
+    this.addLog(`${player.name} hat die Mission „${mission.title}“ abgeschlossen und erhält $${mission.reward} Spielgeld.`, 'system', player);
+  }
+
+  private collectGoSalary(player: Player): void {
+    player.money += this.rules.salary;
+    this.addLog(`${player.name} passed GO and collected $${this.rules.salary}!`, 'system', player);
+    this.completeMission(player, 'pass_go');
   }
 
   // Rolling the dice
@@ -268,8 +290,7 @@ export class GameEngine {
 
     // Passed GO
     if (newPos < oldPos && spaces > 0) {
-      player.money += this.rules.salary;
-      this.addLog(`${player.name} passed GO and collected $${this.rules.salary}!`, 'system', player);
+      this.collectGoSalary(player);
     }
 
     player.position = newPos;
@@ -279,8 +300,7 @@ export class GameEngine {
   // Direct move without passing GO bonus unless specified
   private moveTo(player: Player, destination: number, collectGo: boolean = true): void {
     if (collectGo && destination < player.position) {
-      player.money += this.rules.salary;
-      this.addLog(`${player.name} passed GO and collected $${this.rules.salary}!`, 'system', player);
+      this.collectGoSalary(player);
     }
     player.position = destination;
     this.handleTileLanding(player, destination);
@@ -608,6 +628,7 @@ export class GameEngine {
     player.money -= cost;
     propState.ownerId = player.id;
     this.addLog(`${player.name} bought ${tile.name} for $${cost}!`, 'purchase', player);
+    this.completeMission(player, 'buy_property');
     this.state.phase = 'END_TURN';
     return { success: true };
   }
@@ -665,6 +686,7 @@ export class GameEngine {
       winner.money -= auction.currentBid;
       this.state.properties[tile.id].ownerId = winner.id;
       this.addLog(`${winner.name} gewinnt ${tile.name} für $${auction.currentBid}.`, 'purchase', winner);
+      this.completeMission(winner, 'buy_property');
     } else {
       this.addLog(`${tile?.name || 'Das Grundstück'} wurde nicht versteigert.`, 'system');
     }
@@ -827,6 +849,7 @@ export class GameEngine {
     prop.houses++;
     const typeLabel = prop.houses === 5 ? 'a Hotel' : `House #${prop.houses}`;
     this.addLog(`${player.name} built ${typeLabel} on ${tile.name} for $${cost}!`, 'purchase', player);
+    this.completeMission(player, 'build_house');
     return { success: true };
   }
 

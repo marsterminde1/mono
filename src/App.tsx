@@ -16,6 +16,7 @@ import { PlayerScoreboard, ActionBar } from './components/PlayerHUD';
 import { PropertyPurchase } from './components/PropertyPurchase';
 import { PropertyAuction } from './components/PropertyAuction';
 import { CityEventPanel } from './components/CityEventPanel';
+import { MatchMissionsPanel } from './components/MatchMissionsPanel';
 import { PropertyModal } from './components/PropertyModal';
 import { TradeModal } from './components/TradeModal';
 import { CardModal } from './components/CardModal';
@@ -886,7 +887,7 @@ export default function App() {
                 <button aria-pressed={infoTab === 'log'} onClick={() => setInfoTab('log')}>Verlauf & Chat</button>
                 <button className="info-panel-close" aria-label="Spieler und Chat schließen" onClick={() => setInfoPanelOpen(false)}><X size={18} /></button>
               </div>
-              <div className="game-players-panel"><TradeRequests state={liveGameState || gameState} playerId={currentPlayer.id} respond={handleRespondTrade} cancel={handleCancelTrade} /><PlayerScoreboard gameState={liveGameState || gameState} currentPlayer={currentPlayer} /></div>
+              <div className="game-players-panel"><MatchMissionsPanel gameState={liveGameState || gameState} currentPlayer={currentPlayer} /><TradeRequests state={liveGameState || gameState} playerId={currentPlayer.id} respond={handleRespondTrade} cancel={handleCancelTrade} /><PlayerScoreboard gameState={liveGameState || gameState} currentPlayer={currentPlayer} /></div>
               <div className="game-log-panel"><GameLog players={(liveGameState || gameState).players} currentPlayerId={currentPlayer.id} logs={(liveGameState || gameState).logs} onSendMessage={handleSendMessage} /></div>
             </aside>
           </main>

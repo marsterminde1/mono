@@ -43,7 +43,7 @@ for (const size of BOARD_SIZE_OPTIONS) {
     engine.getActivePlayer()!.position = size - 1;
     engine.rollDice('a');
     assert.equal(engine.getActivePlayer()!.position, 2);
-    assert.equal(engine.getActivePlayer()!.money, boardRules(size).startingCash + boardRules(size).salary);
+    assert.equal(engine.getActivePlayer()!.money, boardRules(size).startingCash + boardRules(size).salary + 50);
     finishLanding(engine);
     for (let roll = 1; roll <= size / 40; roll++) {
       engine = GameEngine.restore(JSON.parse(JSON.stringify(engine.snapshot())));
