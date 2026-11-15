@@ -14,6 +14,7 @@ import { Lobby } from './components/Lobby';
 import { ArenaIntro } from './components/ArenaIntro';
 import { PlayerScoreboard, ActionBar } from './components/PlayerHUD';
 import { PropertyPurchase } from './components/PropertyPurchase';
+import { PropertyAuction } from './components/PropertyAuction';
 import { PropertyModal } from './components/PropertyModal';
 import { TradeModal } from './components/TradeModal';
 import { CardModal } from './components/CardModal';
@@ -107,6 +108,7 @@ export default function App() {
 
   // Modals
   const [dismissedPurchase, setDismissedPurchase] = useState<string | null>(null);
+  const [dismissedAuction, setDismissedAuction] = useState<string | null>(null);
   const [inspectedTile, setInspectedTile] = useState<BoardTile | null>(null);
   const [isPropertyModalOpen, setIsPropertyModalOpen] = useState(false);
   const [isTradeModalOpen, setIsTradeModalOpen] = useState(false);
@@ -419,6 +421,14 @@ export default function App() {
     return new Promise(resolve => socket.emit('game:decline', { roomId: gameState.roomId }, (result: any) => { if (!result.success) notify(result.error || 'Die Aktion ist fehlgeschlagen.', 'error'); resolve(Boolean(result.success)); }));
   };
 
+  const handleAuctionBid = (amount: number): Promise<boolean> => {
+    if (!socket || !gameState) return Promise.resolve(false);
+    return new Promise(resolve => socket.emit('game:auction_bid', { roomId: gameState.roomId, bid: amount }, (result: any) => {
+      if (!result.success) notify(result.error || 'Dein Gebot konnte nicht abgegeben werden.', 'error');
+      resolve(Boolean(result.success));
+    }));
+  };
+
   const handlePayJailFine = () => {
     if (!socket || !gameState) return;
     socket.emit('game:pay_jail', { roomId: gameState.roomId });
@@ -497,8 +507,12 @@ export default function App() {
   const purchaseTile = gameState?.phase === 'ACTION' && activeBuyer && activeBuyer.id === currentPlayer?.id && !activeBuyer?.bankrupt
     && !gameState.properties[activeBuyer.position]?.ownerId ? getBoardTiles(gameState?.boardSize)[activeBuyer.position] : null;
   const purchaseKey = purchaseTile && gameState ? `${gameState.roomId}:${purchaseTile.id}:${gameState.logs.filter(log => log.type === 'roll').at(-1)?.id}` : null;
+  const auction = gameState?.auction;
+  const auctionTile = auction && gameState ? getBoardTiles(gameState.boardSize)[auction.tileId] : null;
+  const auctionKey = auction && gameState ? `${gameState.roomId}:${auction.tileId}:${auction.endsAt}:${auction.currentBid}:${auction.highestBidderId || ''}` : null;
   const pendingTradeCount = (liveGameState?.pendingTrades ?? (liveGameState?.activeTrade ? [liveGameState.activeTrade] : [])).filter(t => t.toPlayerId === currentPlayer?.id).length;
   const showPurchase = Boolean(purchaseTile && purchaseKey !== dismissedPurchase && !isRollingDice && !isDiceSettling && !isMoving && !isPropertyModalOpen && !isTradeModalOpen && !isLeaderboardOpen);
+  const showAuction = Boolean(auction && auctionTile && currentPlayer && auctionKey !== dismissedAuction && !isRollingDice && !isDiceSettling && !isMoving && !isPropertyModalOpen && !isTradeModalOpen && !isLeaderboardOpen);
 
   return (
     <div
@@ -767,7 +781,7 @@ export default function App() {
       {view === 'GAME' && gameState && currentPlayer && (
         <div className="game-workspace h-full w-full flex flex-col overflow-hidden">
           {/* Top Sleek Header Bar */}
-          <header className="game-header" inert={showPurchase || isTradeModalOpen}>
+          <header className="game-header" inert={showPurchase || showAuction || isTradeModalOpen}>
             <div className="game-brand">
               <Crown size={18} className="text-amber-200 shrink-0" />
               <span className="game-brand-name">ARENA DISTRICTS</span>
@@ -797,7 +811,7 @@ export default function App() {
           </header>
 
           {/* Main Maximized Game View (Board Left, Sidebar Right) */}
-          <main className="game-main" inert={showPurchase || isTradeModalOpen}>
+          <main className="game-main" inert={showPurchase || showAuction || isTradeModalOpen}>
             {/* Center / Board Stage */}
             <section className="game-stage">
               {/* Maximized Board Container (3D or 2D) */}
@@ -871,6 +885,15 @@ export default function App() {
             onClose={() => setDismissedPurchase(purchaseKey)}
             onBuy={() => handleBuyProperty(purchaseTile.id)}
             onDecline={handleDeclineProperty}
+          />}
+          {showAuction && auction && auctionTile && currentPlayer && <PropertyAuction
+            key={auctionKey}
+            auction={auction}
+            tile={auctionTile}
+            currentPlayer={gameState?.players.find(player => player.id === currentPlayer.id) || currentPlayer}
+            players={gameState?.players ?? []}
+            onClose={() => setDismissedAuction(auctionKey)}
+            onBid={handleAuctionBid}
           />}
 
           {/* Property Management Deed Modal */}

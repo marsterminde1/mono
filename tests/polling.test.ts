@@ -11,6 +11,8 @@ const idlePoll = {
   turnDeadline: 20_000,
   turnClockReady: true,
   hasPendingTrades: false,
+  auctionEndsAt: null,
+  nextAuctionBotActionAt: null,
 };
 
 test('unchanged poll can be skipped while a human turn is still active', () => {
@@ -27,4 +29,11 @@ test('poll is still processed when a bot, deadline, or pending trade needs a ste
 
 test('poll is not skipped for a stale client revision', () => {
   assert.equal(canSkipUnchangedPoll({ ...idlePoll, clientRevision: 3 }, 10_000), false);
+});
+
+test('active auctions only skip polls while no result or bot action is due', () => {
+  const auctionPoll = { ...idlePoll, phase: 'AUCTION', auctionEndsAt: 20_000, nextAuctionBotActionAt: 15_000 };
+  assert.equal(canSkipUnchangedPoll(auctionPoll, 10_000), true);
+  assert.equal(canSkipUnchangedPoll(auctionPoll, 15_000), false);
+  assert.equal(canSkipUnchangedPoll({ ...auctionPoll, auctionEndsAt: 10_000 }, 10_000), false);
 });

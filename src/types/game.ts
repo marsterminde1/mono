@@ -67,7 +67,7 @@ export interface PropertyState {
   mortgaged: boolean;
 }
 
-export type GamePhase = 'LOBBY' | 'ROLL' | 'ACTION' | 'RESOLVING_CARD' | 'END_TURN' | 'GAME_OVER';
+export type GamePhase = 'LOBBY' | 'ROLL' | 'ACTION' | 'AUCTION' | 'RESOLVING_CARD' | 'END_TURN' | 'GAME_OVER';
 
 export interface Card {
   id: string;
@@ -116,6 +116,17 @@ export interface TradeOffer {
   status: 'PENDING' | 'ACCEPTED' | 'REJECTED' | 'CANCELLED';
 }
 
+export interface PropertyAuction {
+  tileId: number;
+  minimumBid: number;
+  increment: number;
+  currentBid: number;
+  highestBidderId: string | null;
+  endsAt: number;
+  nextBotActionAt: number | null;
+  passedBotIds: string[];
+}
+
 export interface GameLogEntry {
   playerId?: string;
   participantIds?: string[];
@@ -150,6 +161,7 @@ export interface GameState {
   pendingCard: Card | null;
   activeTrade: TradeOffer | null;
   pendingTrades?: TradeOffer[];
+  auction?: PropertyAuction | null;
   logs: GameLogEntry[];
   winnerId?: string;
   lastActionPrompt?: string;

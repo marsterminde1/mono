@@ -171,7 +171,7 @@ export const ActionBar: React.FC<ActionBarProps> = ({
               {isMyTurn ? 'Du bist am Zug' : `${activePlayer?.name} ist am Zug`}
             </span>
             <span className="text-[9px] font-bold uppercase tracking-wider bg-black/40 text-amber-400 border border-amber-500/30 px-2 py-0.5 rounded-full">
-              {activity === 'rolling' ? 'Würfelwurf' : activity === 'result' ? 'Ergebnis' : activity === 'moving' ? 'Bewegung' : ({ LOBBY: 'Warteraum', ROLL: 'Würfeln', ACTION: 'Grundstück', RESOLVING_CARD: 'Ereignis', END_TURN: 'Zug abschließen', GAME_OVER: 'Spielende' }[gameState.phase])}
+              {activity === 'rolling' ? 'Würfelwurf' : activity === 'result' ? 'Ergebnis' : activity === 'moving' ? 'Bewegung' : ({ LOBBY: 'Warteraum', ROLL: 'Würfeln', ACTION: 'Grundstück', AUCTION: 'Auktion', RESOLVING_CARD: 'Ereignis', END_TURN: 'Zug abschließen', GAME_OVER: 'Spielende' }[gameState.phase])}
             </span>
           </div>
           <div className="text-xs font-semibold text-slate-100 mt-0.5" role="status">
@@ -181,6 +181,11 @@ export const ActionBar: React.FC<ActionBarProps> = ({
             {!activity && gameState.phase === 'ACTION' && currentTile && (
               <span>
                 Gelandet auf <b className="text-amber-400">{currentTile.name}</b> (${currentTile.price})
+              </span>
+            )}
+            {!activity && gameState.phase === 'AUCTION' && gameState.auction && (
+              <span>
+                Auktion läuft{gameState.auction.currentBid ? ` – Höchstgebot $${gameState.auction.currentBid}` : ' – noch kein Gebot'}
               </span>
             )}
             {!activity && gameState.phase === 'RESOLVING_CARD' && 'Bestätige die gezogene Ereigniskarte.'}

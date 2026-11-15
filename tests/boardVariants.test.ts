@@ -10,9 +10,19 @@ const game = (boardSize: number) => new GameEngine('CITY', [player('a'), player(
 function finishLanding(engine: GameEngine) {
   for (let i = 0; i < 5; i++) {
     if (engine.getState().phase === 'ACTION') engine.declineProperty(engine.getActivePlayer()!.id);
+    else if (engine.getState().phase === 'AUCTION') {
+      const auction = engine.getState().auction!;
+      engine.auctionStep(auction.nextBotActionAt ?? auction.endsAt);
+    }
     else if (engine.getState().phase === 'RESOLVING_CARD') engine.resolveCard(engine.getActivePlayer()!.id);
     else break;
   }
+}
+
+function stepBotOrAuction(engine: GameEngine) {
+  if (engine.getState().phase !== 'AUCTION') return engine.botStep();
+  const auction = engine.getState().auction!;
+  return engine.auctionStep(auction.nextBotActionAt ?? auction.endsAt);
 }
 for (const size of BOARD_SIZE_OPTIONS) {
   test(`${size} fields: original tiles retained, correct property state and economy`, () => {
@@ -57,7 +67,7 @@ for (const size of BOARD_SIZE_OPTIONS) {
     let turns = new Set<string>(), boughtExpansion = false;
     for (let step = 0; step < 1600 && engine.getState().phase !== 'GAME_OVER'; step++) {
       turns.add(engine.getActivePlayer()!.id);
-      assert.equal(engine.botStep(), true);
+      assert.equal(stepBotOrAuction(engine), true);
       const state = engine.getState();
       assert.ok(state.players.every(p => Number.isFinite(p.money) && p.position >= 0 && p.position < size));
       assert.ok(Object.values(state.properties).every(p => p.houses >= 0 && p.houses <= 5));
@@ -134,7 +144,7 @@ test('XXL timeout preserves extra rolls and refreshes the deadline after each ac
   assert.equal(engine.getState().rollsTaken, 1);
   assert.equal(engine.timeoutStep(51_000), true);
   assert.equal(engine.getActivePlayer()!.id, 'a');
-  assert.equal(engine.getState().phase, 'ROLL');
-  assert.equal(engine.getState().turnDeadline, 76_000);
+  assert.equal(engine.getState().phase, 'AUCTION');
+  assert.equal(engine.getState().turnDeadline, undefined);
   assert.equal(engine.timeoutStep(51_001), false);
 });

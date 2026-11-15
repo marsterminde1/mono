@@ -169,6 +169,8 @@ export default async (req: Request) => {
         bonusRoll: sql<string | null>`${rooms.engine} #>> '{state,bonusRoll}'`,
         pendingTrades: sql<unknown>`${rooms.engine} #> '{state,pendingTrades}'`,
         activeTrade: sql<unknown>`${rooms.engine} #> '{state,activeTrade}'`,
+        auctionEndsAt: sql<string | null>`${rooms.engine} #>> '{state,auction,endsAt}'`,
+        nextAuctionBotActionAt: sql<string | null>`${rooms.engine} #>> '{state,auction,nextBotActionAt}'`,
       }).from(rooms).where(eq(rooms.id, roomId)).limit(1);
       const hasPendingTrades = (Array.isArray(pollRoom?.pendingTrades) && pollRoom.pendingTrades.length > 0)
         || (pollRoom?.activeTrade !== null && pollRoom?.activeTrade !== undefined);
@@ -185,6 +187,8 @@ export default async (req: Request) => {
           turnDeadline: pollRoom.turnDeadline === null ? null : Number(pollRoom.turnDeadline),
           turnClockReady: expectedClockKey !== null && pollRoom.turnClockKey === expectedClockKey,
           hasPendingTrades,
+          auctionEndsAt: pollRoom.auctionEndsAt === null ? null : Number(pollRoom.auctionEndsAt),
+          nextAuctionBotActionAt: pollRoom.nextAuctionBotActionAt === null ? null : Number(pollRoom.nextAuctionBotActionAt),
         })) {
         return respond({ success: true, roomId, revision: pollRoom.revision, unchanged: true });
       }
@@ -259,6 +263,7 @@ export default async (req: Request) => {
           'game:roll': () => engine!.rollDice(playerId),
           'game:buy': () => engine!.buyProperty(playerId, data.tileId),
           'game:decline': () => engine!.declineProperty(playerId),
+          'game:auction_bid': () => engine!.bidOnAuction(playerId, Number(data.bid)),
           'game:pay_jail': () => engine!.payJailFine(playerId),
           'game:use_jail_card': () => engine!.useJailCard(playerId),
           'game:resolve_card': () => engine!.resolveCard(playerId),
@@ -287,6 +292,7 @@ export default async (req: Request) => {
       // One step per poll keeps bots progressing without a background server or timers.
       if (engine && engine.getState().phase !== 'GAME_OVER') {
         if (engine.timeoutStep()) changed = true;
+        if (engine.auctionStep()) changed = true;
         if (engine.botStep()) changed = true;
         if (engine.syncTurnClock()) changed = true;
         for (const trade of engine.pendingTrades()) {

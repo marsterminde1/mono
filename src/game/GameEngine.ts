@@ -8,6 +8,7 @@ import {
   GamePhase,
   GameState,
   Player,
+  PropertyAuction,
   PropertyState,
   TradeOffer,
 } from '../types/game';
@@ -69,6 +70,7 @@ export class GameEngine {
       pendingCard: null,
       activeTrade: null,
       logs: [],
+      auction: null,
       freeParkingPot: 100,
       turnSeconds: options.turnSeconds ?? 25,
     };
@@ -560,14 +562,130 @@ export class GameEngine {
     return { success: true };
   }
 
+  private botAuctionMaximum(bot: Player, tile: BoardTile) {
+    const difficulty = this.botDifficulty(bot);
+    const reserve = difficulty === 'easy' ? 0 : difficulty === 'strategic' ? 300 : 100;
+    const basePrice = tile.price || 0;
+    const group = tile.type === 'street' && tile.color ? propertyGroup(tile.color, tile.id) : [];
+    const required = tile.color ? this.getBuildThreshold(tile.color, tile.id) : 0;
+    const owned = group.filter(id => this.state.properties[id]?.ownerId === bot.id).length;
+    const completesGroup = group.length > 0 && owned < required && owned + 1 >= required;
+    const multiplier = difficulty === 'easy' ? 1.25 : difficulty === 'strategic' ? (completesGroup ? 1.75 : 1.15) : 1;
+    const strategicRentValue = difficulty === 'strategic' ? (tile.rent?.[0] || 0) * 2 : 0;
+    return Math.max(0, Math.min(bot.money - reserve, Math.floor(basePrice * multiplier + strategicRentValue)));
+  }
+
+  private reservedAuctionBid(playerId: string) {
+    const auction = this.state.phase === 'AUCTION' ? this.state.auction : null;
+    return auction?.highestBidderId === playerId ? auction.currentBid : 0;
+  }
+
+  private availableCash(player: Player) {
+    return player.money - this.reservedAuctionBid(player.id);
+  }
+
+  public bidOnAuction(playerId: string, bid: number): { success: boolean; message?: string } {
+    const auction = this.state.auction;
+    if (this.state.phase !== 'AUCTION' || !auction) return { success: false, message: 'No auction is active' };
+    if (Date.now() >= auction.endsAt) return { success: false, message: 'The auction has ended' };
+    const bidder = this.state.players.find(player => player.id === playerId);
+    if (!bidder || bidder.bankrupt) return { success: false, message: 'Player cannot bid' };
+    if (!Number.isSafeInteger(bid)) return { success: false, message: 'Invalid bid' };
+    const minimum = auction.currentBid === 0 ? auction.minimumBid : auction.currentBid + auction.increment;
+    if (bid < minimum) return { success: false, message: `The next bid must be at least $${minimum}` };
+    if (bid > bidder.money) return { success: false, message: 'Insufficient funds for this bid' };
+
+    auction.currentBid = bid;
+    auction.highestBidderId = bidder.id;
+    const eligibleBots = this.state.players.some(player => player.isBot && !player.bankrupt
+      && player.id !== bidder.id && !auction.passedBotIds.includes(player.id));
+    auction.nextBotActionAt = eligibleBots ? Date.now() + 750 : null;
+    const tile = this.tiles[auction.tileId];
+    this.addLog(`${bidder.name} bietet $${bid} für ${tile?.name || 'das Grundstück'}.`, 'system', bidder);
+    return { success: true };
+  }
+
+  private finishAuction(now: number) {
+    const auction = this.state.auction!;
+    const tile = this.tiles[auction.tileId];
+    const winner = auction.highestBidderId
+      ? this.state.players.find(player => player.id === auction.highestBidderId && !player.bankrupt)
+      : undefined;
+    if (tile && winner && this.state.properties[tile.id]?.ownerId === null && winner.money >= auction.currentBid) {
+      winner.money -= auction.currentBid;
+      this.state.properties[tile.id].ownerId = winner.id;
+      this.addLog(`${winner.name} gewinnt ${tile.name} für $${auction.currentBid}.`, 'purchase', winner);
+    } else {
+      this.addLog(`${tile?.name || 'Das Grundstück'} wurde nicht versteigert.`, 'system');
+    }
+    this.state.auction = null;
+    this.state.phase = 'END_TURN';
+    const activePlayer = this.getActivePlayer();
+    if (activePlayer?.bankrupt) this.endTurn(activePlayer.id);
+    this.syncTurnClock(now);
+  }
+
+  public auctionStep(now = Date.now()) {
+    const auction = this.state.auction;
+    if (this.state.phase !== 'AUCTION' || !auction) return false;
+    if (now >= auction.endsAt) {
+      this.finishAuction(now);
+      return true;
+    }
+    if (auction.nextBotActionAt === null || now < auction.nextBotActionAt) return false;
+
+    const nextBid = auction.currentBid === 0 ? auction.minimumBid : auction.currentBid + auction.increment;
+    const tile = this.tiles[auction.tileId];
+    if (!tile) {
+      this.finishAuction(now);
+      return true;
+    }
+    const bots = this.state.players.filter(player => player.isBot && !player.bankrupt
+      && player.id !== auction.highestBidderId && !auction.passedBotIds.includes(player.id));
+    const willingBots = bots.filter(bot => this.botAuctionMaximum(bot, tile) >= nextBid);
+    for (const bot of bots) {
+      if (!willingBots.includes(bot)) auction.passedBotIds.push(bot.id);
+    }
+    const bot = willingBots[0];
+    if (!bot) {
+      auction.nextBotActionAt = null;
+      return true;
+    }
+
+    auction.currentBid = nextBid;
+    auction.highestBidderId = bot.id;
+    this.addLog(`${bot.name} bietet $${nextBid} für ${tile.name}.`, 'system', bot);
+    const anotherBotCanRespond = this.state.players.some(player => player.isBot && !player.bankrupt
+      && player.id !== bot.id && !auction.passedBotIds.includes(player.id));
+    auction.nextBotActionAt = anotherBotCanRespond ? now + 750 : null;
+    return true;
+  }
+
   public declineProperty(playerId: string): { success: boolean; message?: string } {
     if (this.state.phase !== 'ACTION') return { success: false, message: 'Cannot do this in the current phase' };
     const player = this.getActivePlayer();
     if (!player || player.id !== playerId) {
       return { success: false, message: 'Not your turn' };
     }
-    this.addLog(`${player.name} declined to buy the property.`, 'system', player);
-    this.state.phase = 'END_TURN';
+    const tile = this.tiles[player.position];
+    if (!tile || !this.state.properties[tile.id] || this.state.properties[tile.id].ownerId !== null) {
+      return { success: false, message: 'This property cannot be auctioned' };
+    }
+    const now = Date.now();
+    const hasBots = this.state.players.some(candidate => candidate.isBot && !candidate.bankrupt);
+    const auction: PropertyAuction = {
+      tileId: tile.id,
+      minimumBid: 10,
+      increment: 10,
+      currentBid: 0,
+      highestBidderId: null,
+      endsAt: now + 10_000,
+      nextBotActionAt: hasBots ? now + 1_000 : null,
+      passedBotIds: [],
+    };
+    this.state.auction = auction;
+    this.state.phase = 'AUCTION';
+    this.addLog(`${player.name} verzichtet auf ${tile.name}. Die Auktion startet bei $${auction.minimumBid} und endet in 10 Sekunden.`, 'system', player);
     return { success: true };
   }
 
@@ -649,7 +767,7 @@ export class GameEngine {
     }
 
     const cost = tile.houseCost || 100;
-    if (player.money < cost) {
+    if (this.availableCash(player) < cost) {
       return { success: false, message: 'Insufficient funds' };
     }
 
@@ -733,7 +851,7 @@ export class GameEngine {
     }
 
     const cost = Math.floor(((tile.price || 100) / 2) * 1.1); // 10% interest
-    if (player.money < cost) {
+    if (this.availableCash(player) < cost) {
       return { success: false, message: 'Insufficient funds to unmortgage' };
     }
 
@@ -765,7 +883,7 @@ export class GameEngine {
     const toPlayer = this.state.players.find((p) => p.id === offer.toPlayerId);
 
     if (!fromPlayer || !toPlayer) return { success: false, message: 'Invalid players in trade' };
-    if (fromPlayer.money < offer.offeredMoney) return { success: false, message: 'Insufficient cash offered' };
+    if (this.availableCash(fromPlayer) < offer.offeredMoney) return { success: false, message: 'Insufficient cash offered' };
 
     if (this.state.phase === 'GAME_OVER' || this.pendingTrades().some(t => t.fromPlayerId === offer.fromPlayerId && t.toPlayerId === offer.toPlayerId) || fromPlayer.bankrupt || toPlayer.bankrupt || fromPlayer.id === toPlayer.id ||
         ![offer.offeredMoney, offer.requestedMoney].every((n) => Number.isSafeInteger(n) && n >= 0) ||
@@ -826,8 +944,11 @@ export class GameEngine {
       return { success: false, message: 'Trade assets have changed' };
     }
 
-    // Check balances
-    if (fromPlayer.money < trade.offeredMoney || toPlayer.money < trade.requestedMoney) {
+    const fromBalanceAfterTrade = fromPlayer.money - trade.offeredMoney + trade.requestedMoney;
+    const toBalanceAfterTrade = toPlayer.money + trade.offeredMoney - trade.requestedMoney;
+    if (fromPlayer.money < trade.offeredMoney || toPlayer.money < trade.requestedMoney
+      || fromBalanceAfterTrade < this.reservedAuctionBid(fromPlayer.id)
+      || toBalanceAfterTrade < this.reservedAuctionBid(toPlayer.id)) {
       this.finishTrade(trade, 'CANCELLED', 'Trade cancelled: insufficient funds to complete trade.');
       return { success: false, message: 'Insufficient funds to complete trade' };
     }
@@ -945,6 +1066,15 @@ export class GameEngine {
     if (!player) return { success: false, message: 'Player not found' };
 
     player.bankrupt = true;
+    if (this.state.auction?.highestBidderId === playerId) {
+      this.state.auction.currentBid = 0;
+      this.state.auction.highestBidderId = null;
+      this.state.auction.passedBotIds = this.state.auction.passedBotIds.filter(id => id !== playerId);
+      this.state.auction.nextBotActionAt = this.state.players.some(candidate => candidate.isBot && !candidate.bankrupt)
+        ? Date.now() + 750
+        : null;
+      this.addLog(`${player.name} scheidet aus; die Auktion startet wieder beim Mindestgebot.`, 'system', player);
+    }
     for (const trade of [...this.pendingTrades()]) {
       if ([trade.fromPlayerId, trade.toPlayerId].includes(playerId)) this.finishTrade(trade, 'CANCELLED', 'Trade cancelled: player eliminated.');
     }
@@ -963,8 +1093,9 @@ export class GameEngine {
     if (nonBankrupt.length <= 1) {
       this.state.phase = 'GAME_OVER';
       this.state.winnerId = nonBankrupt[0]?.id;
+      this.state.auction = null;
       this.addLog(`🎉 ${nonBankrupt[0]?.name} is the last tycoon standing and wins!`, 'system');
-    } else if (this.state.players[this.state.activePlayerIndex]?.id === playerId) {
+    } else if (this.state.players[this.state.activePlayerIndex]?.id === playerId && this.state.phase !== 'AUCTION') {
       this.state.doublesCount = 0;
       this.state.hasRolled = false;
       this.state.pendingCard = null;
@@ -978,7 +1109,7 @@ export class GameEngine {
   /** Persisted deadlines are checked under the room's database lock. */
   public syncTurnClock(now = Date.now()): boolean {
     const player = this.getActivePlayer();
-    if (!player || player.isBot || this.state.phase === 'GAME_OVER' || this.state.turnSeconds === 0) {
+    if (!player || player.isBot || this.state.phase === 'AUCTION' || this.state.phase === 'GAME_OVER' || this.state.turnSeconds === 0) {
       const changed = this.state.turnDeadline !== undefined;
       delete this.state.turnDeadline;
       delete this.state.turnClockKey;
@@ -1009,8 +1140,7 @@ export class GameEngine {
     }
     if (this.state.phase === 'ROLL') this.rollDice(player.id);
     else if (this.state.phase === 'ACTION') {
-      this.declineProperty(player.id);
-      this.endTurn(player.id);
+      if (!this.declineProperty(player.id).success) this.endTurn(player.id);
     } else if (this.state.phase === 'RESOLVING_CARD') {
       this.resolveCard(player.id);
       if (this.getState().phase === 'END_TURN') this.endTurn(player.id);

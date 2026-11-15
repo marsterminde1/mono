@@ -244,6 +244,8 @@ async function runLocalGame(request: Request) {
       turnDeadline: state?.turnDeadline ?? null,
       turnClockReady: expectedClockKey !== null && state?.turnClockKey === expectedClockKey,
       hasPendingTrades: Boolean(engine?.pendingTrades().length),
+      auctionEndsAt: state?.auction?.endsAt ?? null,
+      nextAuctionBotActionAt: state?.auction?.nextBotActionAt ?? null,
     })) {
       if (!player) return respond({ success: false, error: 'You are no longer in this room' }, 400);
       return respond({ success: true, roomId, revision: room.revision, unchanged: true }, 200, false);
@@ -322,6 +324,7 @@ async function runLocalGame(request: Request) {
         'game:roll': () => engine.rollDice(playerId),
         'game:buy': () => engine.buyProperty(playerId, data.tileId as number),
         'game:decline': () => engine.declineProperty(playerId),
+        'game:auction_bid': () => engine.bidOnAuction(playerId, Number(data.bid)),
         'game:pay_jail': () => engine.payJailFine(playerId),
         'game:use_jail_card': () => engine.useJailCard(playerId),
         'game:resolve_card': () => engine.resolveCard(playerId),
@@ -357,6 +360,7 @@ async function runLocalGame(request: Request) {
     const currentEngine = room.engine;
     if (currentEngine && currentEngine.getState().phase !== 'GAME_OVER') {
       if (currentEngine.timeoutStep()) changed = true;
+      if (currentEngine.auctionStep()) changed = true;
       if (currentEngine.botStep()) changed = true;
       if (currentEngine.syncTurnClock()) changed = true;
       for (const trade of currentEngine.pendingTrades()) {

@@ -5,6 +5,11 @@ import { getBoardTiles, propertyGroup } from '../src/data/boardVariants';
 import type { BotDifficulty, Player } from '../src/types/game';
 const player = (id: string, bot = false, botDifficulty: BotDifficulty = 'balanced'): Player => ({ id, name: id, token: '🎩', color: '#fff', money: 1500, position: 0, inJail: false, jailTurns: 0, getOutOfJailCards: 0, bankrupt: false, isHost: id === 'a', isReady: true, connected: true, isBot: bot, botDifficulty: bot ? botDifficulty : undefined });
 const game = () => new GameEngine('TEST', [player('a'), player('b')]);
+const stepBotOrAuction = (engine: GameEngine) => {
+  if (engine.getState().phase !== 'AUCTION') return engine.botStep();
+  const auction = engine.getState().auction!;
+  return engine.auctionStep(auction.nextBotActionAt ?? auction.endsAt);
+};
 test('saving and restoring preserves ownership, players, turn and card decks', () => {
   const engine = game();
   engine.getState().properties[1].ownerId = 'a';
@@ -53,6 +58,100 @@ test('a player cannot skip rolling or leave unresolved debt behind', () => {
   engine.getState().players[0].money = -50;
   assert.equal(engine.endTurn('a').success, false);
 });
+
+test('declining an unowned property starts an auction with validated bids', () => {
+  const engine = game();
+  const state = engine.getState();
+  state.players[0].position = 1;
+  state.phase = 'ACTION';
+
+  assert.equal(engine.declineProperty('a').success, true);
+  assert.equal(state.phase, 'AUCTION');
+  assert.equal(state.auction?.minimumBid, 10);
+  assert.equal(state.auction?.increment, 10);
+  assert.equal(engine.bidOnAuction('a', 9).success, false);
+  assert.equal(engine.bidOnAuction('a', 10.5).success, false);
+  assert.equal(engine.bidOnAuction('a', 1501).success, false);
+  assert.equal(engine.bidOnAuction('a', 10).success, true);
+});
+
+test('first accepted competing bid stays ahead; winner pays only when auction ends', () => {
+  const engine = game();
+  const state = engine.getState();
+  state.players[0].position = 1;
+  state.phase = 'ACTION';
+  engine.declineProperty('a');
+
+  assert.equal(engine.bidOnAuction('a', 10).success, true);
+  assert.equal(engine.bidOnAuction('b', 10).success, false);
+  assert.equal(state.auction?.highestBidderId, 'a');
+  assert.equal(engine.bidOnAuction('b', 20).success, true);
+  const endsAt = state.auction!.endsAt;
+  assert.equal(engine.auctionStep(endsAt), true);
+  assert.equal(state.phase, 'END_TURN');
+  assert.equal(state.properties[1].ownerId, 'b');
+  assert.equal(state.players[1].money, 1480);
+});
+
+test('auction expiry without bids leaves the property with the bank', () => {
+  const engine = game();
+  const state = engine.getState();
+  state.players[0].position = 1;
+  state.phase = 'ACTION';
+  engine.declineProperty('a');
+
+  assert.equal(engine.auctionStep(state.auction!.endsAt), true);
+  assert.equal(state.phase, 'END_TURN');
+  assert.equal(state.properties[1].ownerId, null);
+});
+
+test('bots do not bid beyond their available strategy limit', () => {
+  const engine = new GameEngine('BOT_AUCTION', [player('human'), player('bot', true, 'balanced')]);
+  const state = engine.getState();
+  state.players[0].position = 1;
+  state.phase = 'ACTION';
+  engine.declineProperty('human');
+  assert.equal(engine.bidOnAuction('human', 60).success, true);
+
+  assert.equal(engine.auctionStep(state.auction!.nextBotActionAt!), true);
+  assert.equal(state.auction?.currentBid, 60);
+  assert.equal(state.auction?.highestBidderId, 'human');
+  assert.ok(state.auction?.passedBotIds.includes('bot'));
+});
+
+test('auction leaders cannot spend committed cash and bankruptcy reopens bidding', () => {
+  const engine = new GameEngine('AUCTION_CASH', [player('a'), player('b'), player('c')]);
+  const state = engine.getState();
+  state.players[0].position = 1;
+  state.players[0].money = 40;
+  state.phase = 'ACTION';
+  state.properties[3].ownerId = 'a';
+  state.properties[3].mortgaged = true;
+  engine.declineProperty('a');
+  assert.equal(engine.bidOnAuction('a', 10).success, true);
+
+  assert.equal(engine.unmortgageProperty('a', 3).success, false);
+  assert.equal(engine.proposeTrade({
+    fromPlayerId: 'a', toPlayerId: 'b', offeredMoney: 31, requestedMoney: 0, offeredProperties: [], requestedProperties: [],
+  }).success, false);
+  assert.equal(engine.proposeTrade({
+    fromPlayerId: 'b', toPlayerId: 'a', offeredMoney: 0, requestedMoney: 31, offeredProperties: [], requestedProperties: [],
+  }).success, true);
+  const trade = engine.pendingTrades()[0];
+  assert.equal(engine.respondTrade(trade.id, 'a', true).success, false);
+  assert.equal(state.players[0].money, 40);
+
+  assert.equal(engine.declareBankruptcy('a').success, true);
+  assert.equal(state.phase, 'AUCTION');
+  assert.equal(state.auction?.currentBid, 0);
+  assert.equal(state.auction?.highestBidderId, null);
+  assert.equal(engine.bidOnAuction('b', 10).success, true);
+  assert.equal(engine.auctionStep(state.auction!.endsAt), true);
+  assert.equal(state.properties[1].ownerId, 'b');
+  assert.equal(state.phase, 'ROLL');
+  assert.equal(engine.getActivePlayer()?.id, 'b');
+});
+
 test('negative trades and changed ownership cannot transfer cash or assets', () => {
   const engine = game();
   const offer = { fromPlayerId: 'a', toPlayerId: 'b', offeredMoney: -100, requestedMoney: 0, offeredProperties: [1], requestedProperties: [] };
@@ -69,9 +168,9 @@ test('insolvent bots mortgage property and then go bankrupt instead of looping',
   engine.getState().players[0].money = -1000;
   engine.getState().properties[1].ownerId = 'a';
   engine.getState().phase = 'END_TURN';
-  assert.equal(engine.botStep(), true);
+  assert.equal(stepBotOrAuction(engine), true);
   assert.equal(engine.getState().properties[1].mortgaged, true);
-  assert.equal(engine.botStep(), true);
+  assert.equal(stepBotOrAuction(engine), true);
   assert.equal(engine.getState().phase, 'GAME_OVER');
   assert.equal(engine.getState().winnerId, 'b');
 });
@@ -163,7 +262,7 @@ test('bots can complete repeated turns across restored server requests', (contex
   let sawPurchase = false;
   let engine = new GameEngine('TEST', [player('a', true), player('b', true)]);
   for (let i = 0; i < 300 && engine.getState().phase !== 'GAME_OVER'; i++) {
-    assert.equal(engine.botStep(), true);
+    assert.equal(stepBotOrAuction(engine), true);
     sawPurchase ||= engine.getState().logs.some(entry => entry.type === 'purchase');
     engine = GameEngine.restore(JSON.parse(JSON.stringify(engine.snapshot())));
   }
@@ -179,7 +278,7 @@ test('bot difficulty policies remain valid across all board sizes', context => {
         player('bot-a', true, difficulty), player('bot-b', true, difficulty),
       ], { boardSize });
       for (let action = 0; action < 200 && engine.getState().phase !== 'GAME_OVER'; action += 1) {
-        assert.equal(engine.botStep(), true);
+        assert.equal(stepBotOrAuction(engine), true);
         const state = engine.getState();
         assert.ok(state.players.every(candidate => Number.isFinite(candidate.money)));
         assert.ok(state.players.every(candidate => candidate.position >= 0 && candidate.position < boardSize));
@@ -204,7 +303,7 @@ test('human deadline survives restore and rolls exactly once after 25 seconds', 
   assert.equal(restored.getState().turnDeadline, deadline + 25_000);
 });
 
-test('expired purchase declines without spending money and advances the turn', () => {
+test('expired purchase starts an auction without spending money or advancing the turn', () => {
   const engine = game();
   const state = engine.getState();
   state.players[0].position = 1;
@@ -213,8 +312,9 @@ test('expired purchase declines without spending money and advances the turn', (
   engine.timeoutStep(26_000);
   assert.equal(state.properties[1].ownerId, null);
   assert.equal(state.players[0].money, 1500);
-  assert.equal(engine.getActivePlayer()?.id, 'b');
-  assert.equal(state.turnDeadline, 51_000);
+  assert.equal(state.phase, 'AUCTION');
+  assert.equal(engine.getActivePlayer()?.id, 'a');
+  assert.equal(state.turnDeadline, undefined);
 });
 
 test('manual phase changes get a fresh clock but repeated polls and chats do not', () => {
