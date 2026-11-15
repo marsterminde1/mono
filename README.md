@@ -14,11 +14,11 @@ Vorhandene Prüfskripte: `npm test`, `npm run lint` (Typecheck), `npm run build`
 
 Das GitHub-Repository in Netlify als neue Website verbinden. `netlify.toml` legt den Build-Befehl, den Veröffentlichungsordner `dist` und den Functions-Ordner fest. Für echte Spielräume muss in Netlify eine Netlify Database mit der Website verbunden sein. SQL-Migrationen unter `netlify/database/migrations/` werden von Netlify beim Deploy automatisch angewendet; ein manuelles Einspielen ist dafür nicht nötig. Das gilt nicht für lokale Vorschauen ohne verbundene Netlify-Umgebung.
 
-Google-Anmeldung benötigt die passenden OAuth-Umgebungsvariablen in den Website-Einstellungen von Netlify. Zugangsdaten gehören nicht ins GitHub-Repository. Siehe auch die [offizielle Anleitung zu Netlify Database](https://docs.netlify.com/build/data-and-storage/netlify-database/).
+Google-Anmeldung benötigt die passenden OAuth-Umgebungsvariablen in den Website-Einstellungen von Netlify. Für Anzeigen dort außerdem `VITE_ADSENSE_CLIENT_ID` und `VITE_ADSENSE_SLOT_ID` als Build-Variablen setzen und den Google-zertifizierten Einwilligungsdialog (TCF) für die Website aktivieren. Der Werbeplatz wird nur nach Spielende, bei bestätigtem Erwachsenenstatus, im Free-Tarif und nach passender Einwilligung geladen. Ohne Variablen oder erreichbare TCF-Schnittstelle werden keine Anzeigen angefordert. Keine Zugangsdaten ins GitHub-Repository eintragen. Siehe auch die [offizielle Anleitung zu Netlify Database](https://docs.netlify.com/build/data-and-storage/netlify-database/).
 
 ## Konten, Mitgliedschaften und Werbung
 
-Die Google-Anmeldung, der Datenexport, die Kontolöschung sowie die vorbereitete Free-/Plus-/Pro-Produktstruktur sind unter [docs/accounts-and-monetization.md](docs/accounts-and-monetization.md) beschrieben. Google-OAuth und eine spätere CMP-/AdSense-Konfiguration benötigen Umgebungsvariablen; ohne OAuth-Konfiguration bleibt die Anmeldung inaktiv. Zahlungsanbieter, Preise und echte Checkout-/Webhook-Verarbeitung sind noch nicht eingerichtet.
+Die Google-Anmeldung, der Datenexport, die Kontolöschung sowie die vorbereitete Free-/Plus-/Pro-Produktstruktur sind unter [docs/accounts-and-monetization.md](docs/accounts-and-monetization.md) beschrieben. Google-OAuth und AdSense benötigen eine Konfiguration in Netlify; ohne OAuth-Konfiguration bleibt die Anmeldung inaktiv. Zahlungsanbieter, Preise und echte Checkout-/Webhook-Verarbeitung sind noch nicht eingerichtet.
 
 ## Weiterentwicklung
 

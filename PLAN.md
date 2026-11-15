@@ -125,7 +125,7 @@ Abnahme lokal: `npm test` (87 Tests), `npm run lint`, `npm run build` und `git d
 
 Das vom Nutzer bereitgestellte `arena_board_v2.glb` wird in der klassischen 40-Felder-Three.js-Ansicht als Brettmodell geladen. Die vorhandenen Felder bleiben anklickbar; Spielfiguren, Besitzmarker und Gebäude werden weiterhin aus dem Spielstand erzeugt. Bis das Modell geladen ist oder falls es nicht geladen werden kann, bleibt die bisherige prozedurale Ansicht als Ersatz erhalten. Die 80-/120-Felder-Ansichten und Spielregeln bleiben unberührt. Das GLB ist 16.406.740 Byte groß; Herkunft und kommerzielle Nutzungsrechte des Modells wurden nicht unabhängig geprüft.
 
-Die Shop-Vorschau verwendet dasselbe Blender-Brett, dreht es standardmäßig langsam und bietet eine Start-/Pause-Schaltfläche. Bei aktivierter Betriebssystem-Einstellung „Bewegung reduzieren“ startet die Drehung pausiert. Die bisherige prozedurale Shop-Vorschau bleibt als Rückfall erhalten.
+Die Shop-Vorschau verwendet dasselbe Blender-Brett, dreht es standardmäßig langsam und bietet eine Start-/Pause-Schaltfläche. Bei aktivierter Betriebssystem-Einstellung „Bewegung reduzieren“ startet die Drehung pausiert. Der alte prozedurale Shop-Aufbau wurde entfernt; während des Ladens erscheint ein Hinweis, bei einem Fehler eine verständliche Meldung. Die bereitgestellte `.blend`-Datei wurde als GLB exportiert. Der Export enthält dieselben 40 anklickbaren Felder und dieselbe Geometrie wie das bereits eingebundene Modell; der Unterschied war nur die Exporter-Metadatenversion.
 
 ## Kompaktere Lobby
 
@@ -136,6 +136,10 @@ Die Lobby zeigt Bereitschaft, Raumgröße und Zeitlimit knapper an. Wiederholte 
 Die Startseite führt jetzt mit einem deutschsprachigen Nutzenversprechen direkt zu Spielername, Raum-Erstellung und Raumcode-Beitritt. Technische Kennzahlen, Brettgrößen-Übersicht und die drei Vorteilskarten wurden aus dem Startbildschirm genommen; die Brettauswahl in der Lobby bleibt bestehen. Auf breiten Bildschirmen teilen sich Einstieg und Profil dieselbe maximale Breite; Profilaktionen und Konto stehen nebeneinander. Auf schmalen Bildschirmen werden die Bereiche gestapelt. Figur- und Farbauswahl, Rangliste, Konto und Shop bleiben erreichbar. Es wurden keine Spielerzahlen oder künstliche Verknappung ergänzt.
 
 Prüfstatus: TypeScript-Prüfung (`npm run lint`) und `git diff --check` bestanden. Die Startseite wurde in der lokalen Vorschau auf Desktop und Mobilgeräten visuell geprüft; dabei wurde ein horizontal überlaufendes Eingabefeld korrigiert. Backend-Funktionen waren in der Vorschau nicht erreichbar, daher wurden Raumerstellung, Beitritt und Konto nicht funktional getestet. Kein Spieltest und kein Build ausgeführt.
+
+## Werbung
+
+Der Werbeplatz wird nur nach Partieende für Free-Spieler mit bestätigtem Erwachsenenstatus und TCF-Einwilligung geladen. Die echte Auslieferung ist noch nicht bestätigt: Netlify benötigt `VITE_ADSENSE_CLIENT_ID`, `VITE_ADSENSE_SLOT_ID` und einen eingebundenen Google-zertifizierten Einwilligungsdialog, der `window.__tcfapi` bereitstellt. Keine IDs oder Zugangsdaten ins Repository schreiben.
 
 ## Etappe 6 – Verifizierte Rangliste und Erfolge
 
