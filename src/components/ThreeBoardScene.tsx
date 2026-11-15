@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import * as THREE from 'three';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { BOARD_TILES } from '../data/monopolyBoard';
 import { BoardTile, GameState, PlayerToken } from '../types/game';
 import { getCardDeckMaterials, getFeltTexture } from '../utils/tileTextureGenerator';
@@ -32,6 +33,8 @@ export const ThreeBoardScene: React.FC<ThreeBoardSceneProps> = ({
   const mountRef = useRef<HTMLDivElement>(null);
   const [cameraMode, setCameraMode] = useState<'angled' | 'top' | 'focus'>('angled');
   const [webglError, setWebglError] = useState(false);
+  const [boardModelError, setBoardModelError] = useState(false);
+  const [boardModelVersion, setBoardModelVersion] = useState(0);
   const [hoveredTile, setHoveredTile] = useState<BoardTile | null>(null);
 
   const liveRef = useRef({ rolling: isRolling, closeup: isDiceCloseup, dice: diceValues || gameState.dice, localPlayerId, onTileClick });
@@ -61,6 +64,7 @@ export const ThreeBoardScene: React.FC<ThreeBoardSceneProps> = ({
   const cameraTargetRef = useRef<THREE.Vector3>(new THREE.Vector3(0, 0, 0));
   const cameraPosTargetRef = useRef<THREE.Vector3>(new THREE.Vector3(0, 16, 17));
   const tileMeshesRef = useRef<THREE.Mesh[]>([]);
+  const boardTilePositionsRef = useRef<Map<number, { x: number; z: number; rotation: number }> | null>(null);
   const hoverHighlightMeshRef = useRef<THREE.Mesh | null>(null);
   const raycasterRef = useRef(new THREE.Raycaster());
   const mouseCoordsRef = useRef(new THREE.Vector2());
@@ -74,6 +78,9 @@ export const ThreeBoardScene: React.FC<ThreeBoardSceneProps> = ({
 
   // Helper to map tile index 0-39 to 3D board coordinates (x, z)
   const getTile3DPosition = (tileId: number): { x: number; z: number; rotation: number } => {
+    const modelPosition = boardTilePositionsRef.current?.get(tileId);
+    if (modelPosition) return modelPosition;
+
     const half = 7.5;
 
     // Corners
@@ -380,6 +387,7 @@ export const ThreeBoardScene: React.FC<ThreeBoardSceneProps> = ({
 
     // 1. Scene
     const scene = new THREE.Scene();
+    let isDisposed = false;
     scene.background = new THREE.Color(0x202023);
     scene.fog = new THREE.FogExp2(0x202023, 0.015);
     sceneRef.current = scene;
@@ -589,7 +597,7 @@ export const ThreeBoardScene: React.FC<ThreeBoardSceneProps> = ({
       tileSlab.rotation.y = rotation;
       tileSlab.receiveShadow = true;
       tileSlab.castShadow = true;
-      (tileSlab as any).tileData = tile;
+      tileSlab.userData.tileData = tile;
 
       boardGroup.add(tileSlab);
       tileMeshes.push(tileSlab);
@@ -605,10 +613,87 @@ export const ThreeBoardScene: React.FC<ThreeBoardSceneProps> = ({
     });
     const highlightMesh = new THREE.Mesh(highlightGeo, highlightMat);
     highlightMesh.visible = false;
-    boardGroup.add(highlightMesh);
+    scene.add(highlightMesh);
     hoverHighlightMeshRef.current = highlightMesh;
 
     scene.add(boardGroup);
+
+    const disposeObjectResources = (root: THREE.Object3D) => {
+      root.traverse((object) => {
+        if (!(object instanceof THREE.Mesh)) return;
+        object.geometry.dispose();
+        const materials = Array.isArray(object.material) ? object.material : [object.material];
+        materials.forEach((material) => {
+          Object.values(material).forEach((value) => {
+            if (value instanceof THREE.Texture) value.dispose();
+          });
+          material.dispose();
+        });
+      });
+    };
+    const boardLoader = new GLTFLoader();
+    boardLoader.load(
+      new URL('../../arena_board_v2.glb', import.meta.url).href,
+      (gltf) => {
+        const model = gltf.scene;
+        if (isDisposed) {
+          disposeObjectResources(model);
+          return;
+        }
+
+        model.scale.setScalar(7.5 / 4.267578125);
+        model.updateMatrixWorld(true);
+        const bounds = new THREE.Box3().setFromObject(model);
+        const center = bounds.getCenter(new THREE.Vector3());
+        model.position.x -= center.x;
+        model.position.y += 0.05 - bounds.max.y;
+        model.position.z -= center.z;
+        model.updateMatrixWorld(true);
+
+        const modelTileMeshes: THREE.Mesh[] = [];
+        const modelTilePositions = new Map<number, { x: number; z: number; rotation: number }>();
+        model.traverse((object) => {
+          if (!(object instanceof THREE.Mesh)) return;
+          object.receiveShadow = true;
+          const fieldMatch = /^Feld_(\d{2})(?:\.\d+)?$/.exec(object.name);
+          if (!fieldMatch) return;
+
+          const tileId = Number(fieldMatch[1]);
+          const tile = BOARD_TILES[tileId];
+          if (!tile) return;
+          object.userData.tileData = tile;
+          modelTileMeshes.push(object);
+
+          const worldPosition = object.getWorldPosition(new THREE.Vector3());
+          modelTilePositions.set(tileId, {
+            x: worldPosition.x,
+            z: worldPosition.z,
+            rotation: getTile3DPosition(tileId).rotation,
+          });
+        });
+
+        if (modelTileMeshes.length !== BOARD_TILES.length) {
+          console.error(`Das 3D-Brett enthält ${modelTileMeshes.length} statt ${BOARD_TILES.length} anklickbarer Felder.`);
+          disposeObjectResources(model);
+          setBoardModelError(true);
+          return;
+        }
+
+        scene.add(model);
+        scene.remove(boardGroup);
+        disposeObjectResources(boardGroup);
+        boardTilePositionsRef.current = modelTilePositions;
+        tileMeshesRef.current = modelTileMeshes;
+        setBoardModelError(false);
+        setBoardModelVersion((version) => version + 1);
+      },
+      undefined,
+      (error) => {
+        if (isDisposed) return;
+        console.error('Das 3D-Brettmodell konnte nicht geladen werden; die Ersatzansicht bleibt aktiv.', error);
+        setBoardModelError(true);
+      }
+    );
 
     const marker = new THREE.Group();
     const markerMaterial = new THREE.MeshStandardMaterial({ color: 0xf4cd78, metalness: 0.65, roughness: 0.25, emissive: 0x3b2810, depthTest: false });
@@ -669,13 +754,13 @@ export const ThreeBoardScene: React.FC<ThreeBoardSceneProps> = ({
         raycasterRef.current.setFromCamera(mouseCoordsRef.current, cameraRef.current);
         const intersects = raycasterRef.current.intersectObjects(tileMeshesRef.current);
         if (intersects.length > 0) {
-          const hitMesh = intersects[0].object as any;
-          const tile = hitMesh.tileData as BoardTile;
+          const hitMesh = intersects[0].object;
+          const tile = hitMesh.userData.tileData as BoardTile | undefined;
           if (tile) {
             setHoveredTile(tile);
             if (hoverHighlightMeshRef.current) {
-              hoverHighlightMeshRef.current.position.copy(hitMesh.position);
-              hoverHighlightMeshRef.current.rotation.copy(hitMesh.rotation);
+              hitMesh.getWorldPosition(hoverHighlightMeshRef.current.position);
+              hitMesh.getWorldQuaternion(hoverHighlightMeshRef.current.quaternion);
               hoverHighlightMeshRef.current.visible = true;
             }
           }
@@ -734,8 +819,8 @@ export const ThreeBoardScene: React.FC<ThreeBoardSceneProps> = ({
       raycasterRef.current.setFromCamera(mouse, cameraRef.current);
       const intersects = raycasterRef.current.intersectObjects(tileMeshesRef.current);
       if (intersects.length > 0) {
-        const hitMesh = intersects[0].object as any;
-        const tile = hitMesh.tileData as BoardTile;
+        const hitMesh = intersects[0].object;
+        const tile = hitMesh.userData.tileData as BoardTile | undefined;
         if (tile) {
           playSound('hop');
           liveRef.current.onTileClick?.(tile);
@@ -860,6 +945,7 @@ export const ThreeBoardScene: React.FC<ThreeBoardSceneProps> = ({
     animate();
 
     return () => {
+      isDisposed = true;
       cancelAnimationFrame(animationFrameId);
       container.removeEventListener('pointerdown', handleMouseDown);
       container.removeEventListener('click', handleClick);
@@ -870,16 +956,9 @@ export const ThreeBoardScene: React.FC<ThreeBoardSceneProps> = ({
       container.removeEventListener('wheel', handleWheel);
       window.removeEventListener('resize', handleResize);
       resizeObserver.disconnect();
-      scene.traverse(obj => {
-        if (obj instanceof THREE.Mesh) {
-          obj.geometry.dispose();
-          const materials = Array.isArray(obj.material) ? obj.material : [obj.material];
-          materials.forEach(material => material.dispose());
-        }
-      });
+      disposeObjectResources(scene);
       mainSun.shadow.map?.dispose();
       environment.dispose();
-      crestTexture.dispose();
       renderer.dispose();
       tokensMapRef.current.clear();
       tokenAnimationRef.current.clear();
@@ -1059,7 +1138,7 @@ export const ThreeBoardScene: React.FC<ThreeBoardSceneProps> = ({
       }
     });
 
-  }, [gameState]);
+  }, [gameState, boardModelVersion]);
 
   const focusedPosition = gameState.players[gameState.activePlayerIndex]?.position;
   useEffect(() => {
@@ -1074,11 +1153,12 @@ export const ThreeBoardScene: React.FC<ThreeBoardSceneProps> = ({
       cameraTargetRef.current.set(x, 0.5, z);
       cameraPosTargetRef.current.set(x, 7, z + 7);
     }
-  }, [cameraMode, cameraMode === 'focus' ? focusedPosition : null]);
+  }, [cameraMode, cameraMode === 'focus' ? focusedPosition : null, boardModelVersion]);
 
   return (
     <div className="arena-classic-3d relative w-full h-full flex flex-col items-center justify-center overflow-hidden rounded-2xl bg-gradient-to-br from-slate-950 via-stone-950 to-slate-950 shadow-2xl border-2 border-amber-900/40">
       {webglError && <div role="alert" className="arena-classic-error"><strong>Die 3D-Ansicht ist hier nicht verfügbar.</strong><p>Wechsle oben zu „2D“, um weiterzuspielen.</p></div>}
+      {boardModelError && <div role="status" className="absolute left-1/2 top-16 z-20 -translate-x-1/2 rounded-lg bg-stone-950/90 px-4 py-2 text-center text-xs text-amber-100">Das neue 3D-Brett konnte nicht geladen werden; die Ersatzansicht ist aktiv.</div>}
       {/* 3D Canvas Mount */}
       <div ref={mountRef} className="w-full h-full touch-none cursor-grab active:cursor-grabbing" />
 
