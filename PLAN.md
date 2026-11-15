@@ -66,3 +66,15 @@ Prüfstatus: Typecheck (`npm run lint`), alle 40 vorhandenen Tests (`npm test`),
 Nach Klarstellung zur Tablet-Aufnahme wurden „Code kopieren“ und „Freunde einladen“ unter dem Lobbytitel in einer eigenen Zeile mit 28 Pixeln Abstand platziert. Beide Schaltflächen erhielten mindestens 48 Pixel hohe Tippflächen; auf schmalen Geräten stand der Raumcode oberhalb der Aktionen. Der Lobby-Scrollbereich wurde oben ausgerichtet und um sichere Bildschirmabstände ergänzt, damit hohe Inhalte nicht durch vertikale Zentrierung oberhalb des Scrollbereichs lagen. Aktionen und Spielfunktionen blieben erhalten.
 
 Prüfstatus: Typecheck, CSS-Parsing und `git diff --check` bestanden. Keine erneuten Spieltests, kein lokaler Build und keine visuelle Browserprüfung wurden ausgeführt.
+
+## Etappe 2 – Raumzuverlässigkeit (15. November 2026)
+
+Zustandsändernde Poll-Anfragen sperren die Raumzeile wie andere Spielaktionen. Der schnelle Poll-Pfad bleibt nur für nachweislich unveränderte Zustände aktiv; Bot-Züge, offene Handelsangebote und fällige bzw. noch nicht eingerichtete Zuguhren gehen weiterhin durch die transaktionale Verarbeitung. Die gemeinsame Host-Abstimmung hält Gastgeber-ID und Gastgeberkennzeichen synchron, übergibt den Gastgeberstatus beim Verlassen und ermöglicht einem zurückkehrenden Gastgeber die Wiederaufnahme einer verlassenen Bot-Lobby. Neue menschliche Spieler übernehmen eine Lobby, falls kein menschlicher Gastgeber mehr vorhanden ist. Keine Datenbankmigration wurde ergänzt.
+
+Abnahme lokal: 58 Tests, Typecheck (`npm run lint`) und Build bestanden. Ergänzende Tests decken Gastgeberübergabe, Rückkehr und gleichzeitige Beitrittsversuche mit Raumlimit ab. Der Build meldet weiterhin bestehende Hinweise zu Vite-Konfiguration und großen Chunks. Es wurde keine echte Netlify-Datenbank verbunden und kein Netzwerk-Lasttest mit 20 Clients ausgeführt; die PostgreSQL-Sperrwirkung unter realer Parallelität ist daher noch nicht produktionsseitig gemessen.
+
+## Etappe 3 – Strategische Bots (15. November 2026)
+
+Die Lobby bietet drei serverseitig gespeicherte Stufen: einfach, ausgeglichen und strategisch. Ausgeglichen bleibt der Standard für ältere Räume und Spielstände. Die Profile unterscheiden sich bei Geldreserven für Käufe und Häuser. Strategische Bots bevorzugen Bauoptionen mit höherem zusätzlichem Mietertrag, halten bei Zahlungsnot baubare Farbgruppen möglichst intakt und bewerten eingehende Tausche anhand von Geld, Grundstückspreisen, Basismieten, Hypotheken und erreichbaren Farbgruppen. Der geschätzte Tauschnettowert wird als ungefähre Begründung im Spielprotokoll angezeigt.
+
+Abnahme: 64 Tests, Typecheck (`npm run lint`) und Build bestanden. Zusätzliche deterministische Prüfungen liefen mit allen drei Bot-Stufen auf 40-, 80- und 120-Felder-Brettern und prüften gültige Positionen, Geldbeträge und Gebäudegrenzen. Das ist eine Funktions-/Stabilitätsprüfung, keine Balance- oder Spielstärkemessung. Der Build meldet weiterhin Hinweise zu Vite-Konfiguration und großen Chunks. Eine echte Netlify-Datenbank, Browser-Mehrspielerrunden und menschliche Balance-Tests wurden nicht ausgeführt.

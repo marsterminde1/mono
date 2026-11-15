@@ -368,7 +368,7 @@ export default function App() {
     }));
   };
 
-  const handleUpdateSettings = (settings: { maxPlayers: number; turnSeconds: number; boardSize?: number; propertyBuildMode?: 'classic' | 'quick' }) => {
+  const handleUpdateSettings = (settings: { maxPlayers: number; turnSeconds: number; boardSize?: number; propertyBuildMode?: 'classic' | 'quick'; botDifficulty?: 'easy' | 'balanced' | 'strategic' }) => {
     if (!socket || !lobbyData) return;
     socket.emit('lobby:settings', { roomId: lobbyData.roomId, ...settings }, (res: any) => { if (!res.success) triggerError(res.error || 'Einstellung fehlgeschlagen'); });
   };

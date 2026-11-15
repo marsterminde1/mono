@@ -23,6 +23,10 @@ export type PropertyColor =
   | 'utility';
 
 export type PropertyBuildMode = 'classic' | 'quick';
+export const BOT_DIFFICULTIES = ['easy', 'balanced', 'strategic'] as const;
+export type BotDifficulty = typeof BOT_DIFFICULTIES[number];
+export const isBotDifficulty = (value: unknown): value is BotDifficulty =>
+  typeof value === 'string' && BOT_DIFFICULTIES.some(difficulty => difficulty === value);
 
 export interface BoardTile {
   id: number;
@@ -52,6 +56,7 @@ export interface Player {
   isHost: boolean;
   isReady: boolean;
   isBot?: boolean;
+  botDifficulty?: BotDifficulty;
   connected: boolean;
 }
 
@@ -165,4 +170,5 @@ export interface LobbySettings {
   maxPlayers: number;
   turnSeconds: number;
   propertyBuildMode?: PropertyBuildMode;
+  botDifficulty?: BotDifficulty;
 }

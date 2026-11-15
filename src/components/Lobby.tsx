@@ -3,7 +3,7 @@ import { TokenArt, tokenLabel } from './TokenArt';
 import { BOARD_SIZE_OPTIONS, boardRules } from '../data/boardVariants';
 import React, { useState } from 'react';
 import { AVAILABLE_TOKENS, PLAYER_COLORS, MAX_PLAYERS, TURN_LIMIT_OPTIONS } from '../data/monopolyBoard';
-import { LobbyRoom, Player, PlayerToken } from '../types/game';
+import { BotDifficulty, LobbyRoom, Player, PlayerToken } from '../types/game';
 import { playSound } from '../utils/sound';
 
 interface LobbyProps {
@@ -15,7 +15,7 @@ interface LobbyProps {
   onRemovePlayer: (playerId: string) => void;
   onStartGame: () => void;
   onLeaveLobby: () => void;
-  onUpdateSettings: (settings: { maxPlayers: number; turnSeconds: number; boardSize?: number; propertyBuildMode?: 'classic' | 'quick' }) => void;
+  onUpdateSettings: (settings: { maxPlayers: number; turnSeconds: number; boardSize?: number; propertyBuildMode?: 'classic' | 'quick'; botDifficulty?: BotDifficulty }) => void;
 }
 
 export const Lobby: React.FC<LobbyProps> = ({
@@ -40,7 +40,7 @@ export const Lobby: React.FC<LobbyProps> = ({
 
   const [linkCopied, setLinkCopied] = useState(false);
   const isHost = currentPlayer.isHost;
-  const settings = { maxPlayers: MAX_PLAYERS, turnSeconds: 25, boardSize: 40, propertyBuildMode: 'classic' as const, ...lobby.settings };
+  const settings = { maxPlayers: MAX_PLAYERS, turnSeconds: 25, boardSize: 40, propertyBuildMode: 'classic' as const, botDifficulty: 'balanced' as BotDifficulty, ...lobby.settings };
   const inviteLink = `${window.location.origin}/?room=${lobby.roomId}`;
   const handleCopyLink = async () => {
     playSound('click');
@@ -403,6 +403,14 @@ export const Lobby: React.FC<LobbyProps> = ({
                   <option value="quick">Schnellbau – ab 2 Feldern einer Farbe</option>
                 </select>
               </label>
+              <label className="block text-xs font-semibold text-slate-400">Bot-Stärke
+                <select value={settings.botDifficulty} disabled={!isHost} onChange={e => onUpdateSettings({ ...settings, botDifficulty: e.target.value as BotDifficulty })} className="w-full mt-1 bg-slate-950 border border-slate-700 text-white rounded-lg px-3 py-2 text-sm disabled:opacity-60">
+                  <option value="easy">Einfach – kauft öfter, hält wenig Reserve</option>
+                  <option value="balanced">Ausgeglichen – spart etwas Geld</option>
+                  <option value="strategic">Strategisch – achtet auf Sets und Ertrag</option>
+                </select>
+              </label>
+              <p className="text-xs text-slate-500">Gilt für alle Bots in dieser Partie. Sie bewerten Käufe, Ausbau, Notverkäufe und Tauschvorschläge nach derselben Stufe.</p>
               <p className="text-xs text-amber-200">${boardRules(settings.boardSize).startingCash.toLocaleString('de-DE')} Startgeld · ${boardRules(settings.boardSize).salary} beim Überqueren von LOS · {boardRules(settings.boardSize).rollsPerTurn} {boardRules(settings.boardSize).rollsPerTurn === 1 ? 'Wurf' : 'Würfe'} pro Zug. Pasch gibt weiterhin einen Zusatzwurf. Gefängnis beendet die Zusatzwürfe.</p>
               <label className="block text-xs font-semibold text-slate-400">
                 Max. Spieler: <span className="text-amber-400">{settings.maxPlayers}</span>

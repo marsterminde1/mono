@@ -1,8 +1,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { GameEngine, MAX_GAME_LOGS } from '../src/game/GameEngine';
-import type { Player } from '../src/types/game';
-const player = (id: string, bot = false): Player => ({ id, name: id, token: '🎩', color: '#fff', money: 1500, position: 0, inJail: false, jailTurns: 0, getOutOfJailCards: 0, bankrupt: false, isHost: id === 'a', isReady: true, connected: true, isBot: bot });
+import { getBoardTiles, propertyGroup } from '../src/data/boardVariants';
+import type { BotDifficulty, Player } from '../src/types/game';
+const player = (id: string, bot = false, botDifficulty: BotDifficulty = 'balanced'): Player => ({ id, name: id, token: '🎩', color: '#fff', money: 1500, position: 0, inJail: false, jailTurns: 0, getOutOfJailCards: 0, bankrupt: false, isHost: id === 'a', isReady: true, connected: true, isBot: bot, botDifficulty: bot ? botDifficulty : undefined });
 const game = () => new GameEngine('TEST', [player('a'), player('b')]);
 test('saving and restoring preserves ownership, players, turn and card decks', () => {
   const engine = game();
@@ -74,6 +75,79 @@ test('insolvent bots mortgage property and then go bankrupt instead of looping',
   assert.equal(engine.getState().phase, 'GAME_OVER');
   assert.equal(engine.getState().winnerId, 'b');
 });
+test('easy bots spend more freely while strategic bots protect a cash reserve', () => {
+  const tile = getBoardTiles(40)[1];
+  const easy = new GameEngine('EASY', [player('bot', true, 'easy'), player('human')]);
+  const strategic = new GameEngine('STRATEGIC', [player('bot', true, 'strategic'), player('human')]);
+  for (const engine of [easy, strategic]) {
+    engine.getState().players[0].position = tile.id;
+    engine.getState().players[0].money = (tile.price || 0) + 150;
+    engine.getState().phase = 'ACTION';
+  }
+
+  easy.botStep();
+  strategic.botStep();
+  assert.equal(easy.getState().properties[tile.id].ownerId, 'bot');
+  assert.equal(strategic.getState().properties[tile.id].ownerId, null);
+  assert.ok(strategic.getState().logs.some(entry => entry.message.includes('Reserve')));
+});
+
+test('strategic bots buy a property that unlocks building and choose one high-return upgrade', () => {
+  const engine = new GameEngine('STRATEGIC', [player('bot', true, 'strategic'), player('human')], { propertyBuildMode: 'quick' });
+  const state = engine.getState();
+  const tile = getBoardTiles(40)[1];
+  const group = propertyGroup(tile.color!, tile.id);
+  for (const id of group.filter(id => id !== tile.id)) state.properties[id].ownerId = 'bot';
+  state.players[0].position = tile.id;
+  state.players[0].money = (tile.price || 0) + 150;
+  state.phase = 'ACTION';
+  engine.botStep();
+  assert.equal(state.properties[tile.id].ownerId, 'bot');
+  assert.ok(state.logs.some(entry => entry.message.includes('Hausbau in der Farbgruppe')));
+
+  state.phase = 'END_TURN';
+  state.players[0].money = 3000;
+  engine.botStep();
+  assert.equal(Object.values(state.properties).reduce((sum, property) => sum + property.houses, 0), 1);
+  assert.ok(state.logs.some(entry => entry.message.includes('möglicher Mehrertrag')));
+});
+
+test('strategic bots mortgage outside a buildable color group first', () => {
+  const engine = new GameEngine('STRATEGIC', [player('bot', true, 'strategic'), player('human')]);
+  const state = engine.getState();
+  const group = propertyGroup(getBoardTiles(40)[1].color!, 1);
+  for (const id of group) state.properties[id].ownerId = 'bot';
+  state.properties[5].ownerId = 'bot';
+  state.players[0].money = -100;
+  state.phase = 'END_TURN';
+
+  engine.botStep();
+  assert.equal(state.properties[5].mortgaged, true);
+  assert.equal(group.some(id => state.properties[id].mortgaged), false);
+});
+
+test('strategic bots evaluate and explain incoming trades', () => {
+  const engine = new GameEngine('TRADE', [player('bot', true, 'strategic'), player('human')]);
+  const state = engine.getState();
+  state.properties[1].ownerId = 'bot';
+  state.properties[3].ownerId = 'human';
+  const badOffer = engine.proposeTrade({
+    fromPlayerId: 'human', toPlayerId: 'bot', offeredMoney: 1, offeredProperties: [],
+    requestedMoney: 0, requestedProperties: [1],
+  });
+  assert.equal(badOffer.success, true);
+  assert.equal(engine.botTradeStep(engine.pendingTrades()[0].id), true);
+  assert.equal(state.properties[1].ownerId, 'bot');
+
+  const goodOffer = engine.proposeTrade({
+    fromPlayerId: 'human', toPlayerId: 'bot', offeredMoney: 0, offeredProperties: [3],
+    requestedMoney: 0, requestedProperties: [],
+  });
+  assert.equal(goodOffer.success, true);
+  assert.equal(engine.botTradeStep(engine.pendingTrades()[0].id), true);
+  assert.equal(state.properties[3].ownerId, 'bot');
+  assert.ok(state.logs.some(entry => entry.message.includes('Vorteil ca.')));
+});
 test('bankruptcy clears the eliminated player’s doubles and pending card', () => {
   const engine = new GameEngine('TEST', [player('a'), player('b'), player('c')]);
   engine.getState().doublesCount = 2;
@@ -94,6 +168,25 @@ test('bots can complete repeated turns across restored server requests', (contex
     engine = GameEngine.restore(JSON.parse(JSON.stringify(engine.snapshot())));
   }
   assert.ok(sawPurchase);
+});
+
+test('bot difficulty policies remain valid across all board sizes', context => {
+  let seed = 127;
+  context.mock.method(Math, 'random', () => { seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0; return seed / 4294967296; });
+  for (const boardSize of [40, 80, 120]) {
+    for (const difficulty of ['easy', 'balanced', 'strategic'] as const) {
+      const engine = new GameEngine(`BOT-${boardSize}-${difficulty}`, [
+        player('bot-a', true, difficulty), player('bot-b', true, difficulty),
+      ], { boardSize });
+      for (let action = 0; action < 200 && engine.getState().phase !== 'GAME_OVER'; action += 1) {
+        assert.equal(engine.botStep(), true);
+        const state = engine.getState();
+        assert.ok(state.players.every(candidate => Number.isFinite(candidate.money)));
+        assert.ok(state.players.every(candidate => candidate.position >= 0 && candidate.position < boardSize));
+        assert.ok(Object.values(state.properties).every(property => property.houses >= 0 && property.houses <= 5));
+      }
+    }
+  }
 });
 
 test('human deadline survives restore and rolls exactly once after 25 seconds', context => {

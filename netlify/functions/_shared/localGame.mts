@@ -4,7 +4,9 @@ import { join } from 'node:path';
 import { BOARD_SIZE_OPTIONS, getBoardTiles } from '../../../src/data/boardVariants.js';
 import { AVAILABLE_TOKENS, PLAYER_COLORS, MAX_PLAYERS, TURN_LIMIT_OPTIONS } from '../../../src/data/monopolyBoard.js';
 import { GameEngine, MAX_GAME_LOGS } from '../../../src/game/GameEngine.js';
-import type { LobbyRoom, Player } from '../../../src/types/game.js';
+import { isBotDifficulty, type BotDifficulty, type LobbyRoom, type Player } from '../../../src/types/game.js';
+import { canSkipUnchangedPoll } from './polling.mjs';
+import { reconcileLobbyHost } from './roomLifecycle.mjs';
 
 const RATE_LIMIT_WINDOW_MS = 60_000;
 const RATE_LIMIT_MAX_REQUESTS = 120;
@@ -178,8 +180,8 @@ async function runLocalGame(request: Request) {
   }
   const guestPlayerId = createHash('sha256').update(guestSession).digest('hex');
   const playerId = getAccountPlayerId(request, guestPlayerId);
-  const respond = async (body: unknown, status = 200) => {
-    await saveLocalState();
+  const respond = async (body: unknown, status = 200, persist = true) => {
+    if (persist) await saveLocalState();
     return Response.json(body, { status, headers });
   };
 
@@ -214,7 +216,7 @@ async function runLocalGame(request: Request) {
         players: [player],
         status: 'WAITING',
         createdAt: Date.now(),
-        settings: { maxPlayers: MAX_PLAYERS, turnSeconds: 25, boardSize: 40, propertyBuildMode: 'classic' },
+        settings: { maxPlayers: MAX_PLAYERS, turnSeconds: 25, boardSize: 40, propertyBuildMode: 'classic', botDifficulty: 'balanced' },
       };
       rooms.set(roomId, { lobby, engine: null, revision: 1, updatedAt: Date.now(), scoreSaved: false });
       return respond({ success: true, roomId, player, lobby, revision: 1 });
@@ -224,21 +226,41 @@ async function runLocalGame(request: Request) {
     const room = rooms.get(roomId);
     if (!room) return respond({ success: false, error: 'Room not found' }, 404);
     const { lobby } = room;
-    lobby.settings = { maxPlayers: MAX_PLAYERS, turnSeconds: 25, boardSize: 40, propertyBuildMode: 'classic', ...lobby.settings };
+    lobby.settings = { maxPlayers: MAX_PLAYERS, turnSeconds: 25, boardSize: 40, propertyBuildMode: 'classic', botDifficulty: 'balanced', ...lobby.settings };
     const capacity = Math.min(MAX_PLAYERS, Math.max(2, lobby.settings.maxPlayers));
     const engine = room.engine;
     let player = lobby.players.find(candidate => candidate.id === playerId);
     let changed = event !== 'room:poll';
+    const state = engine?.getState();
+    const expectedClockKey = state && state.players[state.activePlayerIndex]
+      ? `${state.players[state.activePlayerIndex].id}:${state.phase}:${state.doublesCount}:${state.hasRolled}:${state.rollsTaken ?? 0}:${state.bonusRoll ?? false}`
+      : null;
+    if (event === 'room:poll' && canSkipUnchangedPoll({
+      revision: room.revision,
+      clientRevision: data.revision,
+      phase: state?.phase || null,
+      activePlayerIsBot: state?.players[state.activePlayerIndex]?.isBot === true,
+      turnSeconds: state?.turnSeconds ?? null,
+      turnDeadline: state?.turnDeadline ?? null,
+      turnClockReady: expectedClockKey !== null && state?.turnClockKey === expectedClockKey,
+      hasPendingTrades: Boolean(engine?.pendingTrades().length),
+    })) {
+      if (!player) return respond({ success: false, error: 'You are no longer in this room' }, 400);
+      return respond({ success: true, roomId, revision: room.revision, unchanged: true }, 200, false);
+    }
     const requireHost = () => { if (lobby.hostId !== playerId) throw new Error('Only the host can do this'); };
     const requireLobby = () => { if (engine) throw new Error('Game already started'); };
 
     if (event === 'lobby:join') {
+      const isNewPlayer = !player;
       if (!player) {
         requireLobby();
         if (lobby.players.length >= capacity) throw new Error('Room is full');
         player = makePlayer(playerId, lobby.players, data);
         lobby.players.push(player);
       }
+      if (isNewPlayer && player.id === lobby.hostId) player.isReady = true;
+      reconcileLobbyHost(lobby);
     } else if (!player) {
       throw new Error('You are no longer in this room');
     }
@@ -265,7 +287,9 @@ async function runLocalGame(request: Request) {
       const boardSize = Number(data.boardSize ?? lobby.settings.boardSize ?? 40);
       if (!(BOARD_SIZE_OPTIONS as readonly number[]).includes(boardSize)) throw new Error('Invalid board size');
       const propertyBuildMode = (data.propertyBuildMode ?? lobby.settings.propertyBuildMode ?? 'classic') === 'quick' ? 'quick' : 'classic';
-      lobby.settings = { maxPlayers, turnSeconds, boardSize, propertyBuildMode };
+      const botDifficulty = data.botDifficulty ?? lobby.settings.botDifficulty ?? 'balanced';
+      if (!isBotDifficulty(botDifficulty)) throw new Error('Invalid bot difficulty');
+      lobby.settings = { maxPlayers, turnSeconds, boardSize, propertyBuildMode, botDifficulty };
     } else if (event === 'lobby:remove_player') {
       requireHost();
       requireLobby();
@@ -277,19 +301,14 @@ async function runLocalGame(request: Request) {
       }
       lobby.players = lobby.players.filter(candidate => candidate.id !== playerId);
       if (lobby.hostId === playerId) {
-        const nextHost = lobby.players.find(candidate => !candidate.isBot);
-        if (nextHost) {
-          nextHost.isHost = true;
-          nextHost.isReady = true;
-          lobby.hostId = nextHost.id;
-        }
+        reconcileLobbyHost(lobby);
       }
 
     } else if (event === 'game:start') {
       requireHost();
       requireLobby();
       if (lobby.players.length < 2 || lobby.players.some(candidate => !candidate.isReady)) throw new Error('At least two players must be ready');
-      room.engine = new GameEngine(roomId, lobby.players, {
+      room.engine = new GameEngine(roomId, lobby.players.map(candidate => candidate.isBot ? { ...candidate, botDifficulty: lobby.settings?.botDifficulty ?? 'balanced' } : candidate), {
         turnSeconds: lobby.settings.turnSeconds,
         boardSize: lobby.settings.boardSize,
         propertyBuildMode: lobby.settings.propertyBuildMode,
@@ -342,8 +361,7 @@ async function runLocalGame(request: Request) {
       if (currentEngine.syncTurnClock()) changed = true;
       for (const trade of currentEngine.pendingTrades()) {
         if (currentEngine.getState().players.find(candidate => candidate.id === trade.toPlayerId)?.isBot) {
-          currentEngine.respondTrade(trade.id, trade.toPlayerId, false);
-          changed = true;
+          if (currentEngine.botTradeStep(trade.id)) changed = true;
         }
       }
 

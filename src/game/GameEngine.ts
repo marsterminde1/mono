@@ -2,6 +2,7 @@ import { boardRules, getBoardTiles, propertyGroup } from '../data/boardVariants'
 import { CHANCE_CARDS, COMMUNITY_CARDS } from '../data/monopolyBoard';
 import {
   BoardTile,
+  BotDifficulty,
   Card,
   GameLogEntry,
   GamePhase,
@@ -1018,6 +1019,58 @@ export class GameEngine {
     return true;
   }
 
+  private botDifficulty(player: Player): BotDifficulty {
+    return player.botDifficulty ?? 'balanced';
+  }
+
+  private botPortfolioValue(playerId: string, ownershipOverrides = new Map<number, string | null>()) {
+    const owns = (tileId: number) => ownershipOverrides.has(tileId)
+      ? ownershipOverrides.get(tileId) === playerId
+      : this.state.properties[tileId]?.ownerId === playerId;
+    let value = this.tiles.reduce((sum, tile) => {
+      if (!owns(tile.id) || !this.state.properties[tile.id]) return sum;
+      const property = this.state.properties[tile.id];
+      const base = (tile.price || 0) + (tile.rent?.[0] || 0) * 2;
+      return sum + base * (property.mortgaged ? 0.65 : 1);
+    }, 0);
+
+    for (const tile of this.tiles) {
+      if (!tile.color || !['street', 'railroad', 'utility'].includes(tile.type)) continue;
+      const group = propertyGroup(tile.color, tile.id);
+      if (group[0] !== tile.id) continue;
+      const required = tile.type === 'street' ? this.getBuildThreshold(tile.color, tile.id) : group.length;
+      if (group.filter(owns).length >= required) {
+        value += group.reduce((sum, id) => sum + (this.tiles[id]?.price || 0), 0) * 0.3;
+      }
+    }
+    return value;
+  }
+
+  public botTradeStep(tradeId: string): boolean {
+    const trade = this.pendingTrades().find(candidate => candidate.id === tradeId);
+    const bot = trade && this.state.players.find(player => player.id === trade.toPlayerId);
+    if (!trade || !bot?.isBot || bot.bankrupt) return false;
+
+    const beforeValue = bot.money + this.botPortfolioValue(bot.id);
+    const ownershipAfter = new Map<number, string | null>();
+    for (const id of trade.offeredProperties) ownershipAfter.set(id, bot.id);
+    for (const id of trade.requestedProperties) ownershipAfter.set(id, trade.fromPlayerId);
+    const afterValue = bot.money + trade.offeredMoney - trade.requestedMoney
+      + this.botPortfolioValue(bot.id, ownershipAfter);
+    const netValue = afterValue - beforeValue;
+    const difficulty = this.botDifficulty(bot);
+    const tolerance = difficulty === 'easy' ? boardRules(this.state.boardSize).startingCash * 0.1 : 0;
+    const minimumGain = difficulty === 'strategic' ? boardRules(this.state.boardSize).startingCash * 0.02 : 0;
+    const accept = netValue >= minimumGain - tolerance;
+    const result = this.respondTrade(trade.id, bot.id, accept);
+    const completed = result.success || !this.pendingTrades().some(candidate => candidate.id === trade.id);
+    if (result.success) {
+      const description = netValue >= 0 ? `Vorteil ca. $${Math.round(netValue)}` : `Nachteil ca. $${Math.round(Math.abs(netValue))}`;
+      this.addLog(`${bot.name} ${accept ? 'nimmt an' : 'lehnt ab'} (${description}).`, 'system', bot);
+    }
+    return completed;
+  }
+
   // Bot AI decision maker
   public botStep(): boolean {
     const activePlayer = this.getActivePlayer();
@@ -1029,7 +1082,17 @@ export class GameEngine {
       const owned = Object.values(this.state.properties).filter((p) => p.ownerId === activePlayer.id);
       const built = owned.filter((p) => p.houses > 0).sort((a, b) => b.houses - a.houses);
       for (const prop of built) if (this.sellHouse(activePlayer.id, prop.tileId).success) return true;
-      for (const prop of owned) if (!prop.mortgaged && this.mortgageProperty(activePlayer.id, prop.tileId).success) return true;
+      const mortgageCandidates = owned.filter(prop => !prop.mortgaged).sort((a, b) => {
+        const penalty = (property: PropertyState) => {
+          const tile = this.tiles[property.tileId];
+          if (!tile?.color) return 0;
+          const group = propertyGroup(tile.color, tile.id);
+          const required = tile.type === 'street' ? this.getBuildThreshold(tile.color, tile.id) : group.length;
+          return group.filter(id => this.state.properties[id]?.ownerId === activePlayer.id).length >= required ? 1 : 0;
+        };
+        return penalty(a) - penalty(b) || (this.tiles[a.tileId]?.price || 0) - (this.tiles[b.tileId]?.price || 0);
+      });
+      for (const prop of mortgageCandidates) if (this.mortgageProperty(activePlayer.id, prop.tileId).success) return true;
       this.declareBankruptcy(activePlayer.id);
       return true;
     }
@@ -1049,10 +1112,20 @@ export class GameEngine {
     if (this.state.phase === 'ACTION') {
       const tile = this.tiles[activePlayer.position];
       const cost = tile?.price || 0;
-      // Bot buys if it can keep a healthy cash buffer of at least $100
-      if (activePlayer.money >= cost + 100) {
+      const difficulty = this.botDifficulty(activePlayer);
+      const reserve = difficulty === 'easy' ? 0 : difficulty === 'strategic' ? 300 : 100;
+      const group = tile?.color && tile.type === 'street' ? propertyGroup(tile.color, tile.id) : [];
+      const threshold = tile?.color ? this.getBuildThreshold(tile.color, tile.id) : 0;
+      const ownedInGroup = group.filter(id => this.state.properties[id]?.ownerId === activePlayer.id).length;
+      const unlocksBuilding = group.length > 0 && ownedInGroup < threshold && ownedInGroup + 1 >= threshold;
+      const purchaseReserve = difficulty === 'strategic' && unlocksBuilding ? 100 : reserve;
+      if (activePlayer.money >= cost + purchaseReserve) {
+        if (difficulty === 'strategic' && unlocksBuilding) {
+          this.addLog(`${activePlayer.name} kauft ${tile?.name}, um den Hausbau in der Farbgruppe freizuschalten.`, 'system', activePlayer);
+        }
         this.buyProperty(activePlayer.id, activePlayer.position);
       } else {
+        if (difficulty !== 'easy') this.addLog(`${activePlayer.name} verzichtet auf ${tile?.name} und hält $${purchaseReserve} Reserve.`, 'system', activePlayer);
         this.declineProperty(activePlayer.id);
       }
       return true;
@@ -1064,21 +1137,34 @@ export class GameEngine {
     }
 
     if (this.state.phase === 'END_TURN') {
-      // Check if bot can build houses on monopolies
-      this.tiles.filter(t => t.type === 'street' && propertyGroup(t.color!, t.id)[0] === t.id).forEach((groupTile) => {
-        const color = groupTile.color!;
-        if (color !== 'railroad' && color !== 'utility' && this.hasMonopoly(activePlayer.id, color, groupTile.id)) {
-          const group = propertyGroup(color, groupTile.id);
-          for (const tileId of group) {
-            const prop = this.state.properties[tileId];
-            const tile = this.tiles[tileId];
-            if (prop && prop.houses < 5 && activePlayer.money >= (tile.houseCost || 100) + 200) {
-              this.buildHouse(activePlayer.id, tileId);
-              break;
-            }
-          }
+      const difficulty = this.botDifficulty(activePlayer);
+      const reserve = difficulty === 'easy' ? 0 : difficulty === 'strategic' ? 400 : 200;
+      const options = this.tiles
+        .filter(tile => tile.type === 'street' && tile.color && this.canBuildOnGroup(activePlayer.id, tile.color, tile.id))
+        .map(tile => {
+          const property = this.state.properties[tile.id];
+          const group = propertyGroup(tile.color!, tile.id);
+          const lowestLevel = Math.min(...group.map(id => this.state.properties[id]?.houses ?? 0));
+          const rentGain = (tile.rent?.[(property?.houses || 0) + 1] || 0) - (tile.rent?.[property?.houses || 0] || 0);
+          return { tile, property, group, lowestLevel, rentGain, cost: tile.houseCost || 100 };
+        })
+        .filter(option => option.property
+          && option.property.ownerId === activePlayer.id
+          && option.property.houses === option.lowestLevel
+          && option.property.houses < 5
+          && option.rentGain > 0
+          && !option.group.some(id => this.state.properties[id]?.mortgaged)
+          && activePlayer.money >= option.cost + reserve);
+      if (difficulty === 'strategic') {
+        options.sort((a, b) => b.rentGain / b.cost - a.rentGain / a.cost);
+      }
+      for (const option of options) {
+        if (!this.buildHouse(activePlayer.id, option.tile.id).success) continue;
+        if (difficulty === 'strategic') {
+          this.addLog(`${activePlayer.name} baut auf ${option.tile.name}: möglicher Mehrertrag $${option.rentGain} für $${option.cost}.`, 'system', activePlayer);
+          break;
         }
-      });
+      }
 
       this.endTurn(activePlayer.id);
       return true;

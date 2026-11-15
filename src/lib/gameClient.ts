@@ -55,8 +55,12 @@ export class GameClient {
       await this.ready;
       if (this.stopped) return;
       try {
-        const result = await this.request(event, data);
+        const result = await this.request(event, event === 'room:poll' ? { ...data, revision: this.revision } : data);
         if (event === 'room:poll') this.pollFailure = '';
+        if (event === 'room:poll' && result.unchanged) {
+          callback?.(result);
+          return;
+        }
         if (event === 'lobby:leave') {
           this.roomId = null; this.revision = -1; localStorage.removeItem('arena-room');
         } else {

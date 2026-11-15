@@ -6,14 +6,21 @@ import { accountSessions, rooms, scores } from '../../db/schema.js';
 import { GameEngine } from '../../src/game/GameEngine.js';
 import { AVAILABLE_TOKENS, PLAYER_COLORS, MAX_PLAYERS, TURN_LIMIT_OPTIONS } from '../../src/data/monopolyBoard.js';
 import { MAX_GAME_LOGS } from '../../src/game/GameEngine.js';
-import type { Player, LobbyRoom } from '../../src/types/game.js';
+import { isBotDifficulty, type BotDifficulty, type Player, type LobbyRoom } from '../../src/types/game.js';
 import handleLocalGame from './_shared/localGame.mjs';
+import { canSkipUnchangedPoll } from './_shared/polling.mjs';
+import { reconcileLobbyHost } from './_shared/roomLifecycle.mjs';
 
 const RATE_LIMIT_WINDOW_MS = 60_000;
 const RATE_LIMIT_MAX_REQUESTS = 120;
+const MAX_TRACKED_REQUEST_BUCKETS = 10_000;
 const MAX_ACTIVE_ROOMS = 200;
 const ROOM_INACTIVITY_MS = 24 * 60 * 60 * 1000;
+const ROOM_CLEANUP_INTERVAL_MS = 5 * 60 * 1000;
 const requestBuckets = new Map<string, { count: number; resetAt: number }>();
+let lastRoomCleanupAt = 0;
+let roomCleanupTask: Promise<void> | null = null;
+let lastRequestBucketCleanupAt = 0;
 
 const clampLogs = <T extends { logs?: Array<{ message: string }> }>(state: T | null | undefined): T | null | undefined => {
   if (!state || !Array.isArray(state.logs)) return state;
@@ -22,17 +29,28 @@ const clampLogs = <T extends { logs?: Array<{ message: string }> }>(state: T | n
 };
 
 const cleanupRooms = async (db: ReturnType<typeof database>) => {
-  const rows = await db.select().from(rooms);
-  const staleIds = rows.filter((row) => {
-    const lobby = row.lobby as Partial<LobbyRoom> | undefined;
-    const lastUpdated = row.updatedAt?.getTime?.() ?? Date.now();
-    const lastActivity = Date.now() - lastUpdated;
-    const createdAt = lobby?.createdAt ?? lastUpdated;
-    const roomAge = Date.now() - createdAt;
-    return lastActivity > ROOM_INACTIVITY_MS || roomAge > ROOM_INACTIVITY_MS;
-  }).map((row) => row.id);
-  for (const id of staleIds) {
-    await db.delete(rooms).where(eq(rooms.id, id));
+  const now = Date.now();
+  if (now - lastRoomCleanupAt < ROOM_CLEANUP_INTERVAL_MS) return;
+  if (roomCleanupTask) return roomCleanupTask;
+  roomCleanupTask = (async () => {
+    const rows = await db.select({ id: rooms.id, lobby: rooms.lobby, updatedAt: rooms.updatedAt }).from(rooms);
+    const staleIds = rows.filter((row) => {
+      const lobby = row.lobby as Partial<LobbyRoom> | undefined;
+      const lastUpdated = row.updatedAt?.getTime?.() ?? now;
+      const lastActivity = Date.now() - lastUpdated;
+      const createdAt = lobby?.createdAt ?? lastUpdated;
+      const roomAge = Date.now() - createdAt;
+      return lastActivity > ROOM_INACTIVITY_MS || roomAge > ROOM_INACTIVITY_MS;
+    }).map((row) => row.id);
+    for (const id of staleIds) {
+      await db.delete(rooms).where(eq(rooms.id, id));
+    }
+    lastRoomCleanupAt = Date.now();
+  })();
+  try {
+    await roomCleanupTask;
+  } finally {
+    roomCleanupTask = null;
   }
 };
 
@@ -44,8 +62,20 @@ const getRateLimitKey = (req: Request) => {
 const enforceRateLimit = (req: Request) => {
   const key = `${req.method}:${getRateLimitKey(req)}`;
   const now = Date.now();
+  if (now - lastRequestBucketCleanupAt >= RATE_LIMIT_WINDOW_MS) {
+    for (const [bucketKey, bucket] of requestBuckets) {
+      if (bucket.resetAt <= now) requestBuckets.delete(bucketKey);
+    }
+    lastRequestBucketCleanupAt = now;
+  }
   const current = requestBuckets.get(key);
   if (!current || current.resetAt <= now) {
+    if (!current && requestBuckets.size >= MAX_TRACKED_REQUEST_BUCKETS) {
+      for (const [bucketKey, bucket] of requestBuckets) {
+        if (bucket.resetAt <= now) requestBuckets.delete(bucketKey);
+      }
+      if (requestBuckets.size >= MAX_TRACKED_REQUEST_BUCKETS) throw new Error('Too many requests');
+    }
     requestBuckets.set(key, { count: 1, resetAt: now + RATE_LIMIT_WINDOW_MS });
     return;
   }
@@ -103,28 +133,67 @@ export default async (req: Request) => {
       isHost: !lobbyPlayers.length, isReady: bot || !lobbyPlayers.length, isBot: bot, connected: true,
     });
     if (event === 'lobby:create') {
-      const roomCountRows = await db.select({ count: sql<number>`count(*)::int` }).from(rooms);
-      const roomCount = Number(roomCountRows[0]?.count ?? 0);
-      if (roomCount >= MAX_ACTIVE_ROOMS) {
+      const createdRoom = await db.transaction(async tx => {
+        await tx.execute(sql`SELECT pg_advisory_xact_lock(731904281)`);
+        const roomCountRows = await tx.select({ count: sql<number>`count(*)::int` }).from(rooms);
+        const roomCount = Number(roomCountRows[0]?.count ?? 0);
+        if (roomCount >= MAX_ACTIVE_ROOMS) return null;
+        const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+        let roomId = '';
+        for (const byte of randomBytes(4)) roomId += alphabet[byte % alphabet.length];
+        const player = makePlayer([]);
+        const lobby: LobbyRoom = { roomId, hostId: playerId, players: [player], status: 'WAITING', createdAt: Date.now(), settings: { maxPlayers: MAX_PLAYERS, turnSeconds: 25, boardSize: 40, propertyBuildMode: 'classic', botDifficulty: 'balanced' } };
+        await tx.insert(rooms).values({ id: roomId, lobby });
+        return { roomId, player, lobby };
+      });
+      if (!createdRoom) {
         return respond({ success: false, error: 'Room limit reached' }, 429);
       }
-      const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
-      let roomId = '';
-      for (const byte of randomBytes(4)) roomId += alphabet[byte % alphabet.length];
-      const player = makePlayer([]);
-      const lobby: LobbyRoom = { roomId, hostId: playerId, players: [player], status: 'WAITING', createdAt: Date.now(), settings: { maxPlayers: MAX_PLAYERS, turnSeconds: 25, boardSize: 40, propertyBuildMode: 'classic' } };
-      await db.insert(rooms).values({ id: roomId, lobby });
-      return respond({ success: true, roomId, player, lobby });
+      return respond({ success: true, ...createdRoom, revision: 0 });
     }
     const roomId = String(data.roomId || '').trim().toUpperCase();
+    if (event === 'room:poll') {
+      const [pollRoom] = await db.select({
+        id: rooms.id,
+        lobby: rooms.lobby,
+        revision: rooms.revision,
+        phase: sql<string | null>`${rooms.engine} #>> '{state,phase}'`,
+        activePlayerIsBot: sql<string | null>`${rooms.engine} #>> ARRAY['state', 'players', COALESCE(${rooms.engine} #>> '{state,activePlayerIndex}', '-1'), 'isBot']`,
+        turnSeconds: sql<string | null>`${rooms.engine} #>> '{state,turnSeconds}'`,
+        turnDeadline: sql<string | null>`${rooms.engine} #>> '{state,turnDeadline}'`,
+        turnClockKey: sql<string | null>`${rooms.engine} #>> '{state,turnClockKey}'`,
+        activePlayerId: sql<string | null>`${rooms.engine} #>> ARRAY['state', 'players', COALESCE(${rooms.engine} #>> '{state,activePlayerIndex}', '-1'), 'id']`,
+        doublesCount: sql<string | null>`${rooms.engine} #>> '{state,doublesCount}'`,
+        hasRolled: sql<string | null>`${rooms.engine} #>> '{state,hasRolled}'`,
+        rollsTaken: sql<string | null>`${rooms.engine} #>> '{state,rollsTaken}'`,
+        bonusRoll: sql<string | null>`${rooms.engine} #>> '{state,bonusRoll}'`,
+        pendingTrades: sql<unknown>`${rooms.engine} #> '{state,pendingTrades}'`,
+        activeTrade: sql<unknown>`${rooms.engine} #> '{state,activeTrade}'`,
+      }).from(rooms).where(eq(rooms.id, roomId)).limit(1);
+      const hasPendingTrades = (Array.isArray(pollRoom?.pendingTrades) && pollRoom.pendingTrades.length > 0)
+        || (pollRoom?.activeTrade !== null && pollRoom?.activeTrade !== undefined);
+      const expectedClockKey = pollRoom?.activePlayerId && pollRoom.phase && pollRoom.doublesCount !== null && pollRoom.hasRolled !== null
+        ? `${pollRoom.activePlayerId}:${pollRoom.phase}:${Number(pollRoom.doublesCount)}:${pollRoom.hasRolled === 'true'}:${Number(pollRoom.rollsTaken || 0)}:${pollRoom.bonusRoll === 'true'}`
+        : null;
+      if (pollRoom?.lobby.players.some(p => p.id === playerId)
+        && canSkipUnchangedPoll({
+          revision: pollRoom.revision,
+          clientRevision: data.revision,
+          phase: pollRoom.phase,
+          activePlayerIsBot: pollRoom.activePlayerIsBot === 'true',
+          turnSeconds: pollRoom.turnSeconds === null ? null : Number(pollRoom.turnSeconds),
+          turnDeadline: pollRoom.turnDeadline === null ? null : Number(pollRoom.turnDeadline),
+          turnClockReady: expectedClockKey !== null && pollRoom.turnClockKey === expectedClockKey,
+          hasPendingTrades,
+        })) {
+        return respond({ success: true, roomId, revision: pollRoom.revision, unchanged: true });
+      }
+    }
     const result = await db.transaction(async tx => {
-      const selectRoom = event === 'room:poll'
-        ? tx.select().from(rooms).where(eq(rooms.id, roomId))
-        : tx.select().from(rooms).where(eq(rooms.id, roomId)).for('update');
-      const [row] = await selectRoom;
+      const [row] = await tx.select().from(rooms).where(eq(rooms.id, roomId)).for('update');
       if (!row) throw new Error('Room not found');
       const lobby = row.lobby;
-      lobby.settings = { maxPlayers: MAX_PLAYERS, turnSeconds: 25, boardSize: 40, propertyBuildMode: 'classic', ...lobby.settings };
+      lobby.settings = { maxPlayers: MAX_PLAYERS, turnSeconds: 25, boardSize: 40, propertyBuildMode: 'classic', botDifficulty: 'balanced', ...lobby.settings };
       const capacity = Math.min(MAX_PLAYERS, Math.max(2, lobby.settings.maxPlayers));
       let engine = row.engine ? GameEngine.restore(row.engine) : null;
       let me = lobby.players.find(p => p.id === playerId);
@@ -132,12 +201,15 @@ export default async (req: Request) => {
       const requireHost = () => { if (lobby.hostId !== playerId) throw new Error('Only the host can do this'); };
       const requireLobby = () => { if (engine) throw new Error('Game already started'); };
       if (event === 'lobby:join') {
+        const isNewPlayer = !me;
         if (!me) {
           requireLobby();
           if (lobby.players.length >= capacity) throw new Error('Room is full');
           me = makePlayer(lobby.players);
           lobby.players.push(me);
         }
+        if (isNewPlayer && me.id === lobby.hostId) me.isReady = true;
+        reconcileLobbyHost(lobby);
       } else if (!me) throw new Error('You are no longer in this room');
       if (event === 'lobby:ready') { requireLobby(); me!.isReady = Boolean(data.ready); }
       else if (event === 'lobby:update_player') {
@@ -157,7 +229,9 @@ export default async (req: Request) => {
         const boardSize = Number(data.boardSize ?? lobby.settings.boardSize ?? 40);
         if (!(BOARD_SIZE_OPTIONS as readonly number[]).includes(boardSize)) throw new Error('Invalid board size');
         const propertyBuildMode = (data.propertyBuildMode ?? lobby.settings.propertyBuildMode ?? 'classic') === 'quick' ? 'quick' : 'classic';
-        lobby.settings = { maxPlayers, turnSeconds, boardSize, propertyBuildMode };
+        const botDifficulty = data.botDifficulty ?? lobby.settings.botDifficulty ?? 'balanced';
+        if (!isBotDifficulty(botDifficulty)) throw new Error('Invalid bot difficulty');
+        lobby.settings = { maxPlayers, turnSeconds, boardSize, propertyBuildMode, botDifficulty };
       } else if (event === 'lobby:remove_player') {
         requireHost(); requireLobby();
         if (data.targetPlayerId === playerId) throw new Error('Use leave to exit the room');
@@ -166,13 +240,12 @@ export default async (req: Request) => {
         if (engine && !engine.getState().players.find(p => p.id === playerId)?.bankrupt && engine.getState().phase !== 'GAME_OVER') engine.declareBankruptcy(playerId);
         lobby.players = lobby.players.filter(p => p.id !== playerId);
         if (lobby.hostId === playerId) {
-          const host = lobby.players.find(p => !p.isBot);
-          if (host) { host.isHost = true; host.isReady = true; lobby.hostId = host.id; }
+          reconcileLobbyHost(lobby);
         }
       } else if (event === 'game:start') {
         requireHost(); requireLobby();
         if (lobby.players.length < 2 || lobby.players.some(p => !p.isReady)) throw new Error('At least two players must be ready');
-        engine = new GameEngine(roomId, lobby.players, {
+        engine = new GameEngine(roomId, lobby.players.map(p => p.isBot ? { ...p, botDifficulty: lobby.settings?.botDifficulty ?? 'balanced' } : p), {
           turnSeconds: lobby.settings.turnSeconds,
           boardSize: lobby.settings.boardSize,
           propertyBuildMode: lobby.settings.propertyBuildMode,
@@ -218,8 +291,7 @@ export default async (req: Request) => {
         if (engine.syncTurnClock()) changed = true;
         for (const trade of engine.pendingTrades()) {
           if (engine.getState().players.find(p => p.id === trade.toPlayerId)?.isBot) {
-            engine.respondTrade(trade.id, trade.toPlayerId, false);
-            changed = true;
+            if (engine.botTradeStep(trade.id)) changed = true;
           }
         }
       }
