@@ -1,0 +1,16 @@
+[build]
+  # CLI deploys can start without a prior dependency-install phase.
+  command = "bun install --frozen-lockfile && bun run build"
+  publish = "dist"
+
+  [[redirects]]
+    from = "/shop"
+    to = "/index.html"
+    status = 200
+
+[functions]
+  directory = "netlify/functions"
+  node_bundler = "esbuild"
+[dev]
+  command = "npx vite --host 0.0.0.0"
+  targetPort = 5173

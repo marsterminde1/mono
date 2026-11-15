@@ -1,0 +1,19 @@
+# Local Netlify folder
+.netlify
+
+# Local dependencies and build output
+node_modules/
+dist/
+
+# Local files that must not be committed
+.env
+.env.*
+*.log
+*.pem
+*.key
+*.p12
+*.pfx
+*.zip
+
+# Keep the previous project copy outside this repository's source history
+/monopoly-multiplayer-1fc736-main/

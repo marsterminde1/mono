@@ -1,0 +1,6 @@
+{
+  "name": "Arena Districts",
+  "description": "Mehrspieler-Stadtduell mit Lobby, Handel, Häuserbau und serverseitig validierten Runden.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
