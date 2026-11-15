@@ -19,7 +19,7 @@ export function PropertyModel({ tile, property }: { tile: BoardTile; property?: 
     const camera = new THREE.PerspectiveCamera(36, 1, 0.1, 50);
     const model = createPropertyModel(tile, property);
     if (['street', 'railroad', 'utility'].includes(tile.type)) {
-      const architecture = createArchitecture(tile, property?.houses || 0);
+      const architecture = createArchitecture(tile, property?.houses || 0, Boolean(property?.landmark));
       architecture.position.set(0, 0.12, -0.25); model.add(architecture);
     }
     model.rotation.y = -0.35;
@@ -78,7 +78,7 @@ export function PropertyModel({ tile, property }: { tile: BoardTile; property?: 
       scene.traverse(object => { if (object instanceof THREE.Mesh) { object.geometry.dispose(); (Array.isArray(object.material) ? object.material : [object.material]).forEach(material => materials.add(material)); } });
       materials.forEach(material => material.dispose()); sun.shadow.dispose(); renderer.dispose(); renderer.domElement.remove();
     };
-  }, [tile.id, property?.houses]);
+  }, [tile.id, property?.houses, property?.landmark]);
   return <div className="purchase-model-area">
     <div ref={hostRef} role="img" tabIndex={0} onKeyDown={event => { if (event.key === '+' || event.key === '-') { event.preventDefault(); controlsRef.current(event.key === '+' ? 'in' : 'out'); } }} aria-label={`Drehbares 3D-Modell: ${tile.name}`} className="purchase-model-canvas" />
     {!unavailable && <div className="property-view-controls" aria-label="3D-Ansicht steuern">

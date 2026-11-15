@@ -244,8 +244,9 @@ export const Board: React.FC<BoardProps> = ({
             {prop && prop.houses > 0 && (
               <div className="flex gap-0.5 items-center justify-center">
                 {prop.houses === 5 ? (
-                  <span className="w-3 h-3 bg-red-600 border border-yellow-300 rounded-xs shadow-md text-[7px] font-black text-white flex items-center justify-center">
-                    H
+                  <span className="flex items-center gap-0.5">
+                    <span className="w-3 h-3 bg-red-600 border border-yellow-300 rounded-xs shadow-md text-[7px] font-black text-white flex items-center justify-center">H</span>
+                    {prop.landmark && <span className="w-2 h-2 bg-amber-300 border border-amber-100 rounded-full text-[6px] text-slate-900 flex items-center justify-center" title="Wahrzeichen">◆</span>}
                   </span>
                 ) : (
                   Array.from({ length: prop.houses }).map((_, i) => (

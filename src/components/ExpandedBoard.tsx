@@ -48,7 +48,7 @@ export function ExpandedBoard({ gameState, onTileClick, perspective }: { gameSta
           return <button key={tile.id} data-active={displayedActive?.position === tile.id} className="arena-city-tile" style={{ gridRow: row, gridColumn: col, borderColor: owner?.color }} onClick={() => onTileClick(tile)} title={`${tile.name}${owner ? ` · ${owner.name}` : ''}`} aria-label={`${tile.name}, ${tile.price ? `$${tile.price}` : tile.type}${owner ? `, Besitzer ${owner.name}` : ''}`}>
             <span className="arena-city-band" style={{ background: PROPERTY_COLORS[tile.color || tile.type] || '#ad8950' }} />
             <small>#{tile.id + 1}</small><strong style={{ fontSize: `${Math.max(7, 10 * zoom)}px` }}>{tile.name}</strong><span>{tile.price ? `$${tile.price}` : tile.type === 'go' ? `+$${rules.salary}` : tile.type === 'chance' ? '?' : tile.type === 'community' ? 'Karte' : tile.type === 'gotojail' ? 'Gefängnis →' : tile.type === 'tax' ? `−$${tile.taxAmount}` : '◆'}</span>
-            {property?.houses ? <span className="arena-city-houses">{property.houses === 5 ? '▰ Hotel' : '⌂'.repeat(property.houses)}</span> : null}
+            {property?.houses ? <span className="arena-city-houses">{property.landmark ? '◆ Wahrzeichen' : property.houses === 5 ? '▰ Hotel' : '⌂'.repeat(property.houses)}</span> : null}
             {property?.mortgaged && <small>Hypothek</small>}
             {owner && <i style={{ background: owner.color }} aria-label={`Besitzer ${owner.name}`} />}
             <span className="arena-city-tokens">{occupants.map(p => <span key={p.id} title={p.name} style={{ background: p.color }}><TokenArt token={p.token} /></span>)}</span>
@@ -56,6 +56,6 @@ export function ExpandedBoard({ gameState, onTileClick, perspective }: { gameSta
         })}
       </div>
     </div>
-    <footer className="arena-city-legend"><span>Farbiger Rand = Besitzer</span><span>⌂ Häuser · ▰ Hotel</span><span>Scrollen zum Erkunden · Aktive Figur zum Zentrieren</span></footer>
+    <footer className="arena-city-legend"><span>Farbiger Rand = Besitzer</span><span>⌂ Häuser · ▰ Hotel · ◆ Wahrzeichen</span><span>Scrollen zum Erkunden · Aktive Figur zum Zentrieren</span></footer>
   </div>;
 }

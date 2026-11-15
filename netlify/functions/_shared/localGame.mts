@@ -216,7 +216,7 @@ async function runLocalGame(request: Request) {
         players: [player],
         status: 'WAITING',
         createdAt: Date.now(),
-        settings: { maxPlayers: MAX_PLAYERS, turnSeconds: 25, boardSize: 40, propertyBuildMode: 'classic', botDifficulty: 'balanced' },
+        settings: { maxPlayers: MAX_PLAYERS, turnSeconds: 25, boardSize: 40, propertyBuildMode: 'classic', propertyUpgradeMode: 'standard', botDifficulty: 'balanced' },
       };
       rooms.set(roomId, { lobby, engine: null, revision: 1, updatedAt: Date.now(), scoreSaved: false });
       return respond({ success: true, roomId, player, lobby, revision: 1 });
@@ -226,7 +226,7 @@ async function runLocalGame(request: Request) {
     const room = rooms.get(roomId);
     if (!room) return respond({ success: false, error: 'Room not found' }, 404);
     const { lobby } = room;
-    lobby.settings = { maxPlayers: MAX_PLAYERS, turnSeconds: 25, boardSize: 40, propertyBuildMode: 'classic', botDifficulty: 'balanced', ...lobby.settings };
+    lobby.settings = { maxPlayers: MAX_PLAYERS, turnSeconds: 25, boardSize: 40, propertyBuildMode: 'classic', propertyUpgradeMode: 'standard', botDifficulty: 'balanced', ...lobby.settings };
     const capacity = Math.min(MAX_PLAYERS, Math.max(2, lobby.settings.maxPlayers));
     const engine = room.engine;
     let player = lobby.players.find(candidate => candidate.id === playerId);
@@ -289,9 +289,11 @@ async function runLocalGame(request: Request) {
       const boardSize = Number(data.boardSize ?? lobby.settings.boardSize ?? 40);
       if (!(BOARD_SIZE_OPTIONS as readonly number[]).includes(boardSize)) throw new Error('Invalid board size');
       const propertyBuildMode = (data.propertyBuildMode ?? lobby.settings.propertyBuildMode ?? 'classic') === 'quick' ? 'quick' : 'classic';
+      const propertyUpgradeMode = data.propertyUpgradeMode ?? lobby.settings.propertyUpgradeMode ?? 'standard';
+      if (propertyUpgradeMode !== 'standard' && propertyUpgradeMode !== 'landmark') throw new Error('Invalid property upgrade mode');
       const botDifficulty = data.botDifficulty ?? lobby.settings.botDifficulty ?? 'balanced';
       if (!isBotDifficulty(botDifficulty)) throw new Error('Invalid bot difficulty');
-      lobby.settings = { maxPlayers, turnSeconds, boardSize, propertyBuildMode, botDifficulty };
+      lobby.settings = { maxPlayers, turnSeconds, boardSize, propertyBuildMode, propertyUpgradeMode, botDifficulty };
     } else if (event === 'lobby:remove_player') {
       requireHost();
       requireLobby();
@@ -314,6 +316,7 @@ async function runLocalGame(request: Request) {
         turnSeconds: lobby.settings.turnSeconds,
         boardSize: lobby.settings.boardSize,
         propertyBuildMode: lobby.settings.propertyBuildMode,
+        propertyUpgradeMode: lobby.settings.propertyUpgradeMode,
       });
       lobby.status = 'PLAYING';
     } else if (typeof event === 'string' && event.startsWith('game:')) {
@@ -330,6 +333,7 @@ async function runLocalGame(request: Request) {
         'game:use_jail_card': () => engine.useJailCard(playerId),
         'game:resolve_card': () => engine.resolveCard(playerId),
         'game:build_house': () => engine.buildHouse(playerId, data.tileId as number),
+        'game:build_landmark': () => engine.buildLandmark(playerId, data.tileId as number),
         'game:sell_house': () => engine.sellHouse(playerId, data.tileId as number),
         'game:mortgage': () => engine.mortgageProperty(playerId, data.tileId as number),
         'game:unmortgage': () => engine.unmortgageProperty(playerId, data.tileId as number),
@@ -380,8 +384,12 @@ async function runLocalGame(request: Request) {
         const won = finishedPlayer.id === gameState.winnerId;
         const worth = finishedPlayer.money + Object.values(gameState.properties)
           .filter(property => property.ownerId === finishedPlayer.id)
-          .reduce((sum, property) => sum + (getBoardTiles(gameState.boardSize)[property.tileId]?.price || 0)
-            + property.houses * (getBoardTiles(gameState.boardSize)[property.tileId]?.houseCost || 0), 0);
+          .reduce((sum, property) => {
+            const tile = getBoardTiles(gameState.boardSize)[property.tileId];
+            return sum + (tile?.price || 0)
+              + property.houses * (tile?.houseCost || 0)
+              + (property.landmark ? 3 * (tile?.houseCost || 0) : 0);
+          }, 0);
         scores.set(finishedPlayer.id, {
           id: finishedPlayer.id,
           username: finishedPlayer.name,

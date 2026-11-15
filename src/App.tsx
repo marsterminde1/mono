@@ -371,7 +371,7 @@ export default function App() {
     }));
   };
 
-  const handleUpdateSettings = (settings: { maxPlayers: number; turnSeconds: number; boardSize?: number; propertyBuildMode?: 'classic' | 'quick'; botDifficulty?: 'easy' | 'balanced' | 'strategic' }) => {
+  const handleUpdateSettings = (settings: { maxPlayers: number; turnSeconds: number; boardSize?: number; propertyBuildMode?: 'classic' | 'quick'; propertyUpgradeMode?: 'standard' | 'landmark'; botDifficulty?: 'easy' | 'balanced' | 'strategic' }) => {
     if (!socket || !lobbyData) return;
     socket.emit('lobby:settings', { roomId: lobbyData.roomId, ...settings }, (res: any) => { if (!res.success) triggerError(res.error || 'Einstellung fehlgeschlagen'); });
   };
@@ -455,6 +455,11 @@ export default function App() {
   const handleBuildHouse = (tileId: number) => {
     if (!socket || !gameState) return;
     socket.emit('game:build_house', { roomId: gameState.roomId, tileId });
+  };
+
+  const handleBuildLandmark = (tileId: number) => {
+    if (!socket || !gameState) return;
+    socket.emit('game:build_landmark', { roomId: gameState.roomId, tileId });
   };
 
   const handleSellHouse = (tileId: number) => {
@@ -916,6 +921,7 @@ export default function App() {
                 setInspectedTile(null);
               }}
               onBuildHouse={handleBuildHouse}
+              onBuildLandmark={handleBuildLandmark}
               onSellHouse={handleSellHouse}
               onMortgage={handleMortgage}
               onUnmortgage={handleUnmortgage}

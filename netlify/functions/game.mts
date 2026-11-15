@@ -142,7 +142,7 @@ export default async (req: Request) => {
         let roomId = '';
         for (const byte of randomBytes(4)) roomId += alphabet[byte % alphabet.length];
         const player = makePlayer([]);
-        const lobby: LobbyRoom = { roomId, hostId: playerId, players: [player], status: 'WAITING', createdAt: Date.now(), settings: { maxPlayers: MAX_PLAYERS, turnSeconds: 25, boardSize: 40, propertyBuildMode: 'classic', botDifficulty: 'balanced' } };
+        const lobby: LobbyRoom = { roomId, hostId: playerId, players: [player], status: 'WAITING', createdAt: Date.now(), settings: { maxPlayers: MAX_PLAYERS, turnSeconds: 25, boardSize: 40, propertyBuildMode: 'classic', propertyUpgradeMode: 'standard', botDifficulty: 'balanced' } };
         await tx.insert(rooms).values({ id: roomId, lobby });
         return { roomId, player, lobby };
       });
@@ -197,7 +197,7 @@ export default async (req: Request) => {
       const [row] = await tx.select().from(rooms).where(eq(rooms.id, roomId)).for('update');
       if (!row) throw new Error('Room not found');
       const lobby = row.lobby;
-      lobby.settings = { maxPlayers: MAX_PLAYERS, turnSeconds: 25, boardSize: 40, propertyBuildMode: 'classic', botDifficulty: 'balanced', ...lobby.settings };
+      lobby.settings = { maxPlayers: MAX_PLAYERS, turnSeconds: 25, boardSize: 40, propertyBuildMode: 'classic', propertyUpgradeMode: 'standard', botDifficulty: 'balanced', ...lobby.settings };
       const capacity = Math.min(MAX_PLAYERS, Math.max(2, lobby.settings.maxPlayers));
       let engine = row.engine ? GameEngine.restore(row.engine) : null;
       let me = lobby.players.find(p => p.id === playerId);
@@ -233,9 +233,11 @@ export default async (req: Request) => {
         const boardSize = Number(data.boardSize ?? lobby.settings.boardSize ?? 40);
         if (!(BOARD_SIZE_OPTIONS as readonly number[]).includes(boardSize)) throw new Error('Invalid board size');
         const propertyBuildMode = (data.propertyBuildMode ?? lobby.settings.propertyBuildMode ?? 'classic') === 'quick' ? 'quick' : 'classic';
+        const propertyUpgradeMode = data.propertyUpgradeMode ?? lobby.settings.propertyUpgradeMode ?? 'standard';
+        if (propertyUpgradeMode !== 'standard' && propertyUpgradeMode !== 'landmark') throw new Error('Invalid property upgrade mode');
         const botDifficulty = data.botDifficulty ?? lobby.settings.botDifficulty ?? 'balanced';
         if (!isBotDifficulty(botDifficulty)) throw new Error('Invalid bot difficulty');
-        lobby.settings = { maxPlayers, turnSeconds, boardSize, propertyBuildMode, botDifficulty };
+        lobby.settings = { maxPlayers, turnSeconds, boardSize, propertyBuildMode, propertyUpgradeMode, botDifficulty };
       } else if (event === 'lobby:remove_player') {
         requireHost(); requireLobby();
         if (data.targetPlayerId === playerId) throw new Error('Use leave to exit the room');
@@ -253,6 +255,7 @@ export default async (req: Request) => {
           turnSeconds: lobby.settings.turnSeconds,
           boardSize: lobby.settings.boardSize,
           propertyBuildMode: lobby.settings.propertyBuildMode,
+          propertyUpgradeMode: lobby.settings.propertyUpgradeMode,
         });
         lobby.status = 'PLAYING';
       } else if (event.startsWith('game:')) {
@@ -269,6 +272,7 @@ export default async (req: Request) => {
           'game:use_jail_card': () => engine!.useJailCard(playerId),
           'game:resolve_card': () => engine!.resolveCard(playerId),
           'game:build_house': () => engine!.buildHouse(playerId, data.tileId),
+          'game:build_landmark': () => engine!.buildLandmark(playerId, data.tileId),
           'game:sell_house': () => engine!.sellHouse(playerId, data.tileId),
           'game:mortgage': () => engine!.mortgageProperty(playerId, data.tileId),
           'game:unmortgage': () => engine!.unmortgageProperty(playerId, data.tileId),
@@ -311,7 +315,10 @@ export default async (req: Request) => {
           const state = engine.getState();
           for (const p of state.players.filter(p => !p.isBot)) {
             const won = p.id === state.winnerId;
-            const worth = p.money + Object.values(state.properties).filter(prop => prop.ownerId === p.id).reduce((sum, prop) => sum + (getBoardTiles(state.boardSize)[prop.tileId]?.price || 0) + prop.houses * (getBoardTiles(state.boardSize)[prop.tileId]?.houseCost || 0), 0);
+            const worth = p.money + Object.values(state.properties).filter(prop => prop.ownerId === p.id).reduce((sum, prop) => {
+              const tile = getBoardTiles(state.boardSize)[prop.tileId];
+              return sum + (tile?.price || 0) + prop.houses * (tile?.houseCost || 0) + (prop.landmark ? 3 * (tile?.houseCost || 0) : 0);
+            }, 0);
             await tx.insert(scores).values({ id: p.id, username: p.name, wins: won ? 1 : 0, gamesPlayed: 1, totalCashEarned: won ? Math.max(0, worth) : 0 }).onConflictDoUpdate({ target: scores.id, set: {
               username: p.name, wins: sql`${scores.wins} + ${won ? 1 : 0}`, gamesPlayed: sql`${scores.gamesPlayed} + 1`, totalCashEarned: sql`${scores.totalCashEarned} + ${won ? Math.max(0, worth) : 0}`, updatedAt: new Date(),
             } });

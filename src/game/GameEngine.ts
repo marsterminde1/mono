@@ -11,6 +11,7 @@ import {
   GameState,
   Player,
   PropertyAuction,
+  PropertyUpgradeMode,
   PropertyState,
   TradeOffer,
 } from '../types/game';
@@ -30,9 +31,10 @@ export class GameEngine {
   private chanceDeck: Card[];
   private communityDeck: Card[];
 
-  constructor(roomId: string, players: Player[], options: { turnSeconds?: number; boardSize?: number; propertyBuildMode?: PropertyBuildMode } = {}) {
+  constructor(roomId: string, players: Player[], options: { turnSeconds?: number; boardSize?: number; propertyBuildMode?: PropertyBuildMode; propertyUpgradeMode?: PropertyUpgradeMode } = {}) {
     const rules = boardRules(options.boardSize);
     const propertyBuildMode = options.propertyBuildMode ?? 'classic';
+    const propertyUpgradeMode = options.propertyUpgradeMode ?? 'standard';
     // Initialize properties state
     const properties: Record<number, PropertyState> = {};
     getBoardTiles(rules.boardSize).forEach((tile) => {
@@ -53,6 +55,7 @@ export class GameEngine {
       roomId,
       boardSize: rules.boardSize,
       propertyBuildMode,
+      propertyUpgradeMode,
       rollsTaken: 0,
       phase: 'ROLL',
       players: players.map((p) => ({
@@ -102,6 +105,7 @@ export class GameEngine {
       ...snapshot.state,
       logs: trimGameLogs(snapshot.state.logs),
       roundNumber: snapshot.state.roundNumber ?? 1,
+      propertyUpgradeMode: snapshot.state.propertyUpgradeMode ?? 'standard',
       roundStartPlayerId: snapshot.state.roundStartPlayerId ?? snapshot.state.players[snapshot.state.activePlayerIndex]?.id ?? null,
       cityEventVote: snapshot.state.cityEventVote ?? null,
       activeCityEvent: snapshot.state.activeCityEvent ?? null,
@@ -396,6 +400,9 @@ export class GameEngine {
   public calculateRent(tile: BoardTile, propState: PropertyState, owner: Player): number {
     if (tile.type === 'street') {
       const houses = propState.houses;
+      if (propState.landmark && houses === 5 && tile.rent?.[5] !== undefined) {
+        return Math.round(tile.rent[5] * 1.5);
+      }
       if (houses > 0 && tile.rent && tile.rent[houses]) {
         return tile.rent[houses];
       }
@@ -823,6 +830,41 @@ export class GameEngine {
     return { success: true };
   }
 
+  public buildLandmark(playerId: string, tileId: number): { success: boolean; message?: string } {
+    const player = this.state.players.find((p) => p.id === playerId);
+    if (!player) return { success: false, message: 'Player not found' };
+    if (this.state.propertyUpgradeMode !== 'landmark') {
+      return { success: false, message: 'Landmark upgrades are disabled for this game' };
+    }
+
+    const tile = this.tiles[tileId];
+    const prop = this.state.properties[tileId];
+    if (!tile || !prop || prop.ownerId !== playerId || tile.type !== 'street' || !tile.color) {
+      return { success: false, message: 'Cannot build a landmark on this property' };
+    }
+    if (prop.houses !== 5 || prop.landmark) {
+      return { success: false, message: 'A landmark requires an unupgraded hotel' };
+    }
+
+    const group = propertyGroup(tile.color, tile.id);
+    if (group.some(id => this.state.properties[id]?.ownerId !== playerId)) {
+      return { success: false, message: 'A landmark requires the complete color group' };
+    }
+    if (group.some(id => this.state.properties[id]?.mortgaged)) {
+      return { success: false, message: 'Cannot build while any property in the group is mortgaged' };
+    }
+
+    const cost = (tile.houseCost || 100) * 3;
+    if (this.availableCash(player) < cost) {
+      return { success: false, message: 'Insufficient funds' };
+    }
+
+    player.money -= cost;
+    prop.landmark = true;
+    this.addLog(`${player.name} upgraded the hotel on ${tile.name} to a landmark for $${cost}!`, 'purchase', player);
+    return { success: true };
+  }
+
   // Selling houses/hotels
   public sellHouse(playerId: string, tileId: number): { success: boolean; message?: string } {
     const player = this.state.players.find((p) => p.id === playerId);
@@ -832,6 +874,14 @@ export class GameEngine {
     const prop = this.state.properties[tileId];
     if (!tile || !prop || prop.ownerId !== playerId || tile.type !== 'street' || !tile.color) {
       return { success: false, message: 'Cannot sell on this property' };
+    }
+
+    if (prop.landmark) {
+      const refund = Math.floor((tile.houseCost || 100) * 3 / 2);
+      player.money += refund;
+      prop.landmark = false;
+      this.addLog(`${player.name} sold the landmark on ${tile.name} for $${refund}!`, 'system', player);
+      return { success: true };
     }
 
     if (prop.houses <= 0) {
@@ -868,7 +918,7 @@ export class GameEngine {
     // Check if any property in color group has houses
     if (tile.color) {
       const group = propertyGroup(tile.color, tile.id);
-      const hasHouses = group.some((id) => (this.state.properties[id]?.houses ?? 0) > 0);
+      const hasHouses = group.some((id) => (this.state.properties[id]?.houses ?? 0) > 0 || this.state.properties[id]?.landmark);
       if (hasHouses) {
         return { success: false, message: 'Sell all buildings on this color group before mortgaging' };
       }
@@ -933,7 +983,7 @@ export class GameEngine {
     if (this.state.phase === 'GAME_OVER' || this.pendingTrades().some(t => t.fromPlayerId === offer.fromPlayerId && t.toPlayerId === offer.toPlayerId) || fromPlayer.bankrupt || toPlayer.bankrupt || fromPlayer.id === toPlayer.id ||
         ![offer.offeredMoney, offer.requestedMoney].every((n) => Number.isSafeInteger(n) && n >= 0) ||
         ![offer.offeredProperties, offer.requestedProperties].every((ids) => Array.isArray(ids) && new Set(ids).size === ids.length) ||
-        [...offer.offeredProperties, ...offer.requestedProperties].some((id) => this.state.properties[id]?.houses > 0)) {
+        [...offer.offeredProperties, ...offer.requestedProperties].some((id) => this.state.properties[id]?.houses > 0 || this.state.properties[id]?.landmark)) {
       return { success: false, message: 'Invalid trade offer' };
     }
 
@@ -983,8 +1033,8 @@ export class GameEngine {
     }
 
     if (fromPlayer.bankrupt || toPlayer.bankrupt ||
-        !trade.offeredProperties.every((id) => this.state.properties[id]?.ownerId === fromPlayer.id && !this.state.properties[id].houses) ||
-        !trade.requestedProperties.every((id) => this.state.properties[id]?.ownerId === toPlayer.id && !this.state.properties[id].houses)) {
+        !trade.offeredProperties.every((id) => this.state.properties[id]?.ownerId === fromPlayer.id && !this.state.properties[id].houses && !this.state.properties[id].landmark) ||
+        !trade.requestedProperties.every((id) => this.state.properties[id]?.ownerId === toPlayer.id && !this.state.properties[id].houses && !this.state.properties[id].landmark)) {
       this.finishTrade(trade, 'CANCELLED', 'Trade cancelled: ownership or buildings have changed.');
       return { success: false, message: 'Trade assets have changed' };
     }
@@ -1173,6 +1223,7 @@ export class GameEngine {
       if (prop.ownerId === playerId) {
         prop.ownerId = null;
         prop.houses = 0;
+        prop.landmark = false;
         prop.mortgaged = false;
       }
     });
@@ -1373,13 +1424,49 @@ export class GameEngine {
           && option.rentGain > 0
           && !option.group.some(id => this.state.properties[id]?.mortgaged)
           && activePlayer.money >= option.cost + reserve);
+      let botBuilt = false;
       if (difficulty === 'strategic') {
         options.sort((a, b) => b.rentGain / b.cost - a.rentGain / a.cost);
       }
       for (const option of options) {
         if (!this.buildHouse(activePlayer.id, option.tile.id).success) continue;
+        botBuilt = true;
         if (difficulty === 'strategic') {
           this.addLog(`${activePlayer.name} baut auf ${option.tile.name}: möglicher Mehrertrag $${option.rentGain} für $${option.cost}.`, 'system', activePlayer);
+          break;
+        }
+      }
+
+      if (!botBuilt && this.state.propertyUpgradeMode === 'landmark') {
+        const landmarkOptions = this.tiles
+          .filter(tile => tile.type === 'street' && tile.color)
+          .map(tile => {
+            const property = this.state.properties[tile.id];
+            const group = propertyGroup(tile.color!, tile.id);
+            const hotelRent = tile.rent?.[5] ?? 0;
+            return {
+              tile,
+              property,
+              group,
+              cost: (tile.houseCost || 100) * 3,
+              rentGain: Math.round(hotelRent * 1.5) - hotelRent,
+            };
+          })
+          .filter(option => option.property?.ownerId === activePlayer.id
+            && option.property.houses === 5
+            && !option.property.landmark
+            && option.group.every(id => this.state.properties[id]?.ownerId === activePlayer.id)
+            && !option.group.some(id => this.state.properties[id]?.mortgaged)
+            && option.rentGain > 0
+            && activePlayer.money >= option.cost + reserve);
+        if (difficulty === 'strategic') {
+          landmarkOptions.sort((a, b) => b.rentGain / b.cost - a.rentGain / a.cost);
+        }
+        for (const option of landmarkOptions) {
+          if (!this.buildLandmark(activePlayer.id, option.tile.id).success) continue;
+          if (difficulty === 'strategic') {
+            this.addLog(`${activePlayer.name} errichtet auf ${option.tile.name} ein Wahrzeichen: möglicher Mehrertrag $${option.rentGain} für $${option.cost}.`, 'system', activePlayer);
+          }
           break;
         }
       }

@@ -50,6 +50,79 @@ test('classic build mode still requires a full color set', () => {
   assert.equal(state.properties[6].houses, 0);
 });
 
+test('landmark upgrades need the full unmortgaged set and add half the hotel rent', () => {
+  const engine = new GameEngine('LANDMARK', [player('a'), player('b')], {
+    propertyBuildMode: 'quick',
+    propertyUpgradeMode: 'landmark',
+  });
+  const state = engine.getState();
+  const tile = getBoardTiles(40)[1];
+  const group = propertyGroup(tile.color!, tile.id);
+  const houseCost = tile.houseCost!;
+  const upgradeCost = houseCost * 3;
+  for (const id of group) {
+    state.properties[id].ownerId = 'a';
+    state.properties[id].houses = 5;
+  }
+  state.properties[group[1]].mortgaged = true;
+  state.players[0].money = upgradeCost * 2;
+
+  assert.equal(engine.buildLandmark('a', tile.id).success, false);
+  assert.equal(state.properties[tile.id].landmark, undefined);
+  state.properties[group[1]].mortgaged = false;
+  state.players[0].money = upgradeCost - 1;
+  assert.equal(engine.buildLandmark('a', tile.id).success, false);
+  assert.equal(state.properties[tile.id].landmark, undefined);
+  state.players[0].money = upgradeCost;
+  assert.equal(engine.buildLandmark('a', tile.id).success, true);
+  assert.equal(state.players[0].money, 0);
+  assert.equal(state.properties[tile.id].landmark, true);
+  assert.equal(engine.calculateRent(tile, state.properties[tile.id], state.players[0]), Math.round(tile.rent![5] * 1.5));
+});
+
+test('landmark sale refunds half the upgrade cost and leaves the hotel intact', () => {
+  const engine = new GameEngine('LANDMARK_SELL', [player('a'), player('b')], { propertyUpgradeMode: 'landmark' });
+  const state = engine.getState();
+  const tile = getBoardTiles(40)[1];
+  const group = propertyGroup(tile.color!, tile.id);
+  for (const id of group) {
+    state.properties[id].ownerId = 'a';
+    state.properties[id].houses = 5;
+  }
+  state.properties[tile.id].landmark = true;
+  state.players[0].money = 0;
+
+  assert.equal(engine.sellHouse('a', tile.id).success, true);
+  assert.equal(state.players[0].money, Math.floor(tile.houseCost! * 3 / 2));
+  assert.equal(state.properties[tile.id].landmark, false);
+  assert.equal(state.properties[tile.id].houses, 5);
+  assert.equal(engine.calculateRent(tile, state.properties[tile.id], state.players[0]), tile.rent![5]);
+});
+
+test('landmark upgrades are disabled by default and always require the full color group', () => {
+  const engine = new GameEngine('LANDMARK_RULES', [player('a'), player('b')], {
+    propertyBuildMode: 'quick',
+    propertyUpgradeMode: 'landmark',
+  });
+  const state = engine.getState();
+  const tile = getBoardTiles(40)[1];
+  const group = propertyGroup(tile.color!, tile.id);
+  state.players[0].money = 10000;
+  state.properties[tile.id].ownerId = 'a';
+  state.properties[tile.id].houses = 5;
+
+  assert.equal(engine.buildLandmark('a', tile.id).success, false);
+  assert.equal(state.properties[tile.id].landmark, undefined);
+
+  const standard = new GameEngine('LANDMARK_DISABLED', [player('a'), player('b')]);
+  const standardTile = getBoardTiles(40)[1];
+  for (const id of propertyGroup(standardTile.color!, standardTile.id)) {
+    standard.getState().properties[id].ownerId = 'a';
+    standard.getState().properties[id].houses = 5;
+  }
+  assert.equal(standard.buildLandmark('a', standardTile.id).success, false);
+});
+
 test('a player cannot skip rolling or leave unresolved debt behind', () => {
   const engine = game();
   assert.equal(engine.endTurn('a').success, false);
@@ -230,10 +303,12 @@ test('legacy snapshots receive a safe city event vote state', () => {
   delete snapshot.state.cityEventVote;
   delete snapshot.state.activeCityEvent;
   delete snapshot.state.cityEventBuildDiscounts;
+  delete snapshot.state.propertyUpgradeMode;
   const restored = GameEngine.restore(snapshot);
   assert.equal(restored.getState().roundNumber, 1);
   assert.equal(restored.getState().roundStartPlayerId, 'a');
   assert.equal(restored.getState().cityEventVote?.forRound, 2);
+  assert.equal(restored.getState().propertyUpgradeMode, 'standard');
 });
 
 test('negative trades and changed ownership cannot transfer cash or assets', () => {
@@ -293,6 +368,25 @@ test('strategic bots buy a property that unlocks building and choose one high-re
   engine.botStep();
   assert.equal(Object.values(state.properties).reduce((sum, property) => sum + property.houses, 0), 1);
   assert.ok(state.logs.some(entry => entry.message.includes('möglicher Mehrertrag')));
+});
+
+test('bots can build a landmark when no regular hotel upgrade remains', () => {
+  const engine = new GameEngine('BOT_LANDMARK', [player('bot', true, 'strategic'), player('human')], {
+    propertyUpgradeMode: 'landmark',
+  });
+  const state = engine.getState();
+  const tile = getBoardTiles(40)[1];
+  const group = propertyGroup(tile.color!, tile.id);
+  for (const id of group) {
+    state.properties[id].ownerId = 'bot';
+    state.properties[id].houses = 5;
+  }
+  state.players[0].money = 10000;
+  state.phase = 'END_TURN';
+
+  assert.equal(engine.botStep(), true);
+  assert.ok(group.some(id => state.properties[id].landmark));
+  assert.ok(state.logs.some(entry => entry.message.includes('Wahrzeichen')));
 });
 
 test('strategic bots mortgage outside a buildable color group first', () => {

@@ -4,7 +4,7 @@ import type { BoardTile } from '../types/game';
 import { PROPERTY_COLORS } from './propertyModel';
 
 /** Procedural miniature architecture: real geometry, no image stand-ins. */
-export function createArchitecture(tile: BoardTile, level = 0): THREE.Group {
+export function createArchitecture(tile: BoardTile, level = 0, landmark = false): THREE.Group {
   const group = new THREE.Group();
   const hotel = level === 5;
   const facade = new THREE.MeshStandardMaterial({ color: hotel ? '#a64e3e' : (PROPERTY_COLORS[tile.color || 'brown'] || '#c9b999'), roughness: .72 });
@@ -49,6 +49,10 @@ export function createArchitecture(tile: BoardTile, level = 0): THREE.Group {
     }
   }
   if (hotel) { box(.4, .09, .035, brass, 0, height - .02, .275); }
+  if (hotel && landmark) {
+    box(.16, .32, .16, brass, .25, height + .22, 0);
+    mesh(new THREE.ConeGeometry(.15, .2, 4), brass, .25, height + .48, 0);
+  }
   // Batch facade details by material to keep large boards affordable to render.
   group.updateMatrixWorld(true);
   const batches = new Map<THREE.Material, THREE.BufferGeometry[]>();

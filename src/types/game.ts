@@ -23,6 +23,7 @@ export type PropertyColor =
   | 'utility';
 
 export type PropertyBuildMode = 'classic' | 'quick';
+export type PropertyUpgradeMode = 'standard' | 'landmark';
 export const BOT_DIFFICULTIES = ['easy', 'balanced', 'strategic'] as const;
 export type BotDifficulty = typeof BOT_DIFFICULTIES[number];
 export const isBotDifficulty = (value: unknown): value is BotDifficulty =>
@@ -65,6 +66,7 @@ export interface PropertyState {
   ownerId: string | null;
   houses: number; // 0-4 houses, 5 = hotel
   mortgaged: boolean;
+  landmark?: boolean;
 }
 
 export type GamePhase = 'LOBBY' | 'ROLL' | 'ACTION' | 'AUCTION' | 'RESOLVING_CARD' | 'END_TURN' | 'GAME_OVER';
@@ -156,6 +158,7 @@ export interface GameLogEntry {
 export interface GameState {
   boardSize?: number;
   propertyBuildMode?: PropertyBuildMode;
+  propertyUpgradeMode?: PropertyUpgradeMode;
   rollsTaken?: number;
   bonusRoll?: boolean;
   /** Seconds per human action before auto-play; 0 disables the limit. */
@@ -199,5 +202,6 @@ export interface LobbySettings {
   maxPlayers: number;
   turnSeconds: number;
   propertyBuildMode?: PropertyBuildMode;
+  propertyUpgradeMode?: PropertyUpgradeMode;
   botDifficulty?: BotDifficulty;
 }

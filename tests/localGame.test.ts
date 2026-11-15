@@ -141,17 +141,28 @@ test('host-selected bot difficulty is validated and persisted into the server ga
   const host = await newSession('Host');
   const created = await (await post('lobby:create', { playerName: host.name }, host.cookie)).json() as { roomId: string };
   const roomData = { roomId: created.roomId };
-  const settings = { maxPlayers: 4, turnSeconds: 25, boardSize: 40, propertyBuildMode: 'classic', botDifficulty: 'strategic' };
+  const settings = { maxPlayers: 4, turnSeconds: 25, boardSize: 40, propertyBuildMode: 'classic', propertyUpgradeMode: 'landmark', botDifficulty: 'strategic' };
   const saved = await post('lobby:settings', { ...roomData, ...settings }, host.cookie);
   assert.equal((await saved.json() as { success: boolean }).success, true);
   const invalid = await post('lobby:settings', { ...roomData, ...settings, botDifficulty: 'impossible' }, host.cookie);
   assert.equal((await invalid.json() as { success: boolean }).success, false);
+  const invalidUpgrade = await post('lobby:settings', { ...roomData, ...settings, propertyUpgradeMode: 'unlimited' }, host.cookie);
+  assert.equal((await invalidUpgrade.json() as { success: boolean }).success, false);
 
   await post('lobby:add_bot', roomData, host.cookie);
   const started = await (await post('game:start', roomData, host.cookie)).json() as {
     success: boolean;
-    gameState: { players: Array<{ isBot?: boolean; botDifficulty?: string }> };
+    gameState: {
+      propertyUpgradeMode?: string;
+      players: Array<{ isBot?: boolean; botDifficulty?: string }>;
+    };
   };
   assert.equal(started.success, true);
   assert.equal(started.gameState.players.find(player => player.isBot)?.botDifficulty, 'strategic');
+  assert.equal(started.gameState.propertyUpgradeMode, 'landmark');
+  const invalidBuild = await (await post('game:build_landmark', { ...roomData, tileId: 1 }, host.cookie)).json() as {
+    success: boolean;
+    message?: string;
+  };
+  assert.equal(invalidBuild.success, false);
 });

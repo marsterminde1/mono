@@ -69,7 +69,7 @@ export function DioramaBoard({ gameState, onTileClick }: { gameState: GameState;
         if (!['street','railroad','utility'].includes(tile.type)) return;
         const property = live.current.properties[tile.id]; const [x,z,r] = position(tile.id);
         const lot = new THREE.Group(); lot.position.set(x,.12,z); lot.rotation.y = r;
-        const building = createArchitecture(tile, property?.houses || 0); building.scale.setScalar(.82); building.position.z = -.42; lot.add(building);
+        const building = createArchitecture(tile, property?.houses || 0, Boolean(property?.landmark)); building.scale.setScalar(.82); building.position.z = -.42; lot.add(building);
         if (property?.ownerId) {
           const owner = live.current.players.find(p => p.id === property.ownerId);
           const badge = new THREE.Mesh(new THREE.BoxGeometry(.95,.035,.11), new THREE.MeshStandardMaterial({color: property.mortgaged ? '#7c7a70' : owner?.color || '#d4bc82'})); badge.position.set(0,.05,.72); lot.add(badge);

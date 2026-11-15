@@ -90,7 +90,7 @@ export const TradeModal: React.FC<TradeModalProps> = ({
 
   const propertyRow = (id: number, selected: boolean, toggle: () => void) => {
     const tile = getBoardTiles(gameState?.boardSize)[id];
-    const improved = gameState.properties[id]?.houses > 0;
+    const improved = gameState.properties[id]?.houses > 0 || gameState.properties[id]?.landmark;
     return <div key={id} className="trade-property-row" data-previewed={previewId === id}>
       <input type="checkbox" aria-label={`${tile.name} zum Handel auswählen`} checked={selected} disabled={improved} onChange={toggle} />
       <button type="button" className="trade-property-preview" aria-label={`${tile.name} in 3D ansehen`} aria-pressed={previewId === id} onClick={() => setPreviewId(id)}>
@@ -150,7 +150,7 @@ export const TradeModal: React.FC<TradeModalProps> = ({
           {previewTile && <section ref={previewRef} className="trade-model-panel" aria-label="Grundstücksvorschau">
             <header><div><span className="purchase-eyebrow">Grundstück ansehen · {previewOwner?.name || 'Bank'}</span><h3>{previewTile.name}</h3></div><button type="button" aria-label="Grundstücksvorschau schließen" onClick={() => setPreviewId(null)}><X size={18} /></button></header>
             <PropertyModel key={previewTile.id} tile={previewTile} property={previewProperty} />
-            <p>Kaufwert: ${previewTile.price} · {previewProperty?.mortgaged ? 'Mit Hypothek belastet' : 'Ohne Hypothek'} · {previewProperty?.houses === 5 ? 'Hotel' : `${previewProperty?.houses || 0} Häuser`}</p>
+            <p>Kaufwert: ${previewTile.price} · {previewProperty?.mortgaged ? 'Mit Hypothek belastet' : 'Ohne Hypothek'} · {previewProperty?.landmark ? 'Wahrzeichen' : previewProperty?.houses === 5 ? 'Hotel' : `${previewProperty?.houses || 0} Häuser`}</p>
           </section>}
           <p className="text-xs text-slate-400">Klicke auf den Grundstücksnamen für das 3D-Brettfeld. Mit dem Häkchen wählst du es für den Handel aus.</p>
           {/* Partner Selector */}

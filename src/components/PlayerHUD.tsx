@@ -21,12 +21,12 @@ export const PlayerScoreboard: React.FC<PlayerScoreboardProps> = ({
     const props = Object.values(gameState.properties).filter((p) => p.ownerId === playerId);
     const propCount = props.length;
     const houseCount = props.reduce(
-      (acc, p) => acc + (p.houses > 0 ? (p.houses === 5 ? 5 : p.houses) : 0),
+      (acc, p) => acc + (p.houses > 0 ? (p.houses === 5 ? 5 : p.houses) : 0) + (p.landmark ? 1 : 0),
       0
     );
     const assetValue = props.reduce((acc, p) => {
       const tile = getBoardTiles(gameState?.boardSize)[p.tileId];
-      return acc + (tile?.price || 0) + p.houses * (tile?.houseCost || 50);
+      return acc + (tile?.price || 0) + p.houses * (tile?.houseCost || 50) + (p.landmark ? (tile?.houseCost || 50) * 3 : 0);
     }, 0);
     return { propCount, houseCount, assetValue };
   };

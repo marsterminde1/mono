@@ -11,6 +11,7 @@ interface PropertyModalProps {
   selectedTile?: BoardTile | null;
   onClose: () => void;
   onBuildHouse: (tileId: number) => void;
+  onBuildLandmark: (tileId: number) => void;
   onSellHouse: (tileId: number) => void;
   onMortgage: (tileId: number) => void;
   onUnmortgage: (tileId: number) => void;
@@ -22,6 +23,7 @@ export const PropertyModal: React.FC<PropertyModalProps> = ({
   selectedTile: initialTile,
   onClose,
   onBuildHouse,
+  onBuildLandmark,
   onSellHouse,
   onMortgage,
   onUnmortgage,
@@ -42,6 +44,17 @@ export const PropertyModal: React.FC<PropertyModalProps> = ({
     color &&
     propertyGroup(color, activeTileId).length > 0 &&
     propertyGroup(color, activeTileId).every((id) => gameState.properties[id]?.ownerId === currentPlayer.id);
+  const groupHasMortgage = Boolean(color && propertyGroup(color, activeTileId).some(id => gameState.properties[id]?.mortgaged));
+  const groupHasBuildings = Boolean(color && propertyGroup(color, activeTileId).some(id =>
+    (gameState.properties[id]?.houses ?? 0) > 0 || gameState.properties[id]?.landmark
+  ));
+  const landmarkCost = (activeTile?.houseCost || 100) * 3;
+  const canBuildLandmark = gameState.propertyUpgradeMode === 'landmark'
+    && Boolean(hasMonopoly)
+    && propState?.houses === 5
+    && !propState.landmark
+    && !propState.mortgaged
+    && !groupHasMortgage;
 
   // Group all properties owned by currentPlayer
   const myProperties = Object.values(gameState.properties)
@@ -113,6 +126,8 @@ export const PropertyModal: React.FC<PropertyModalProps> = ({
                         <div className="text-[10px] text-slate-400">
                           {prop.mortgaged
                             ? 'Mortgaged'
+                            : prop.landmark
+                            ? '1 Wahrzeichen'
                             : prop.houses === 5
                             ? '1 Hotel'
                             : prop.houses > 0
@@ -187,6 +202,12 @@ export const PropertyModal: React.FC<PropertyModalProps> = ({
                         <span>With HOTEL</span>
                         <span>${activeTile.rent[5]}</span>
                       </div>
+                      {gameState.propertyUpgradeMode === 'landmark' && (
+                        <div className="flex justify-between text-amber-700 font-semibold">
+                          <span>Mit Wahrzeichen</span>
+                          <span>${Math.round(activeTile.rent[5] * 1.5)}</span>
+                        </div>
+                      )}
                       <div className="flex justify-between text-[10px] text-slate-600 pt-1">
                         <span>House Cost</span>
                         <span>${activeTile.houseCost} each</span>
@@ -235,7 +256,8 @@ export const PropertyModal: React.FC<PropertyModalProps> = ({
             {isMine && propState && activeTile && (
               <div className="w-full mt-4 space-y-2">
                 {activeTile.type === 'street' && (
-                  <div className="flex gap-2">
+                  <div className="flex flex-col gap-2">
+                    <div className="flex gap-2">
                     {/* Build house */}
                     <button
                       onClick={() => {
@@ -246,10 +268,11 @@ export const PropertyModal: React.FC<PropertyModalProps> = ({
                         !hasMonopoly ||
                         propState.houses >= 5 ||
                         propState.mortgaged ||
+                        propState.landmark ||
                         currentPlayer.money < (activeTile.houseCost || 100)
                       }
                       className={`cursor-pointer flex-1 py-2 rounded-xl text-xs font-bold transition-all ${
-                        hasMonopoly && propState.houses < 5 && !propState.mortgaged
+                        hasMonopoly && propState.houses < 5 && !propState.mortgaged && !propState.landmark
                           ? 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-md'
                           : 'bg-slate-800 text-slate-500 border border-slate-700 cursor-not-allowed'
                       }`}
@@ -260,7 +283,7 @@ export const PropertyModal: React.FC<PropertyModalProps> = ({
                     </button>
 
                     {/* Sell house */}
-                    {propState.houses > 0 && (
+                    {(propState.houses > 0 || propState.landmark) && (
                       <button
                         onClick={() => {
                           playSound('money');
@@ -268,7 +291,24 @@ export const PropertyModal: React.FC<PropertyModalProps> = ({
                         }}
                         className="cursor-pointer flex-1 py-2 rounded-xl text-xs font-bold bg-amber-600 hover:bg-amber-500 text-white transition-all shadow-md"
                       >
-                        Sell House (+${Math.floor((activeTile.houseCost || 100) / 2)})
+                        {propState.landmark
+                          ? `Wahrzeichen verkaufen (+$${Math.floor(landmarkCost / 2)})`
+                          : `Sell House (+$${Math.floor((activeTile.houseCost || 100) / 2)})`}
+                      </button>
+                    )}
+                    </div>
+                    {gameState.propertyUpgradeMode === 'landmark' && propState.houses === 5 && (
+                      <button
+                        type="button"
+                        onClick={() => onBuildLandmark(activeTile.id)}
+                        disabled={!canBuildLandmark || currentPlayer.money < landmarkCost}
+                        className={`cursor-pointer w-full py-2 rounded-xl text-xs font-bold transition-all ${
+                          canBuildLandmark && currentPlayer.money >= landmarkCost
+                            ? 'bg-amber-500 hover:bg-amber-400 text-slate-950 shadow-md'
+                            : 'bg-slate-800 text-slate-500 border border-slate-700 cursor-not-allowed'
+                        }`}
+                      >
+                        Wahrzeichen errichten · ${landmarkCost} · Miete +50 %
                       </button>
                     )}
                   </div>
@@ -282,7 +322,7 @@ export const PropertyModal: React.FC<PropertyModalProps> = ({
                         playSound('money');
                         onMortgage(activeTile.id);
                       }}
-                      disabled={propState.houses > 0}
+                      disabled={groupHasBuildings}
                       className="cursor-pointer flex-1 py-2 rounded-xl text-xs font-bold bg-slate-800 hover:bg-slate-700 text-amber-400 border border-amber-500/30 transition-colors"
                     >
                       Mortgage (+${Math.floor((activeTile.price || 100) / 2)})

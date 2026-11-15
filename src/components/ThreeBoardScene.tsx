@@ -1007,6 +1007,14 @@ export const ThreeBoardScene: React.FC<ThreeBoardSceneProps> = ({
         roof.rotation.y = Math.PI / 4;
         roof.position.y = 0.44;
         hotelGroup.add(roof);
+        if (prop.landmark) {
+          const spire = new THREE.Mesh(
+            new THREE.ConeGeometry(0.13, 0.3, 4),
+            new THREE.MeshStandardMaterial({ color: 0xfbbf24, metalness: 0.65, roughness: 0.25 })
+          );
+          spire.position.set(0, 0.65, 0);
+          hotelGroup.add(spire);
+        }
 
         hotelGroup.position.set(outerX, 0.06, outerZ);
         hotelGroup.rotation.y = rotation;

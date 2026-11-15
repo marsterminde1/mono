@@ -3,7 +3,7 @@ import { TokenArt, tokenLabel } from './TokenArt';
 import { BOARD_SIZE_OPTIONS, boardRules } from '../data/boardVariants';
 import React, { useState } from 'react';
 import { AVAILABLE_TOKENS, PLAYER_COLORS, MAX_PLAYERS, TURN_LIMIT_OPTIONS } from '../data/monopolyBoard';
-import { BotDifficulty, LobbyRoom, Player, PlayerToken } from '../types/game';
+import { BotDifficulty, LobbyRoom, Player, PlayerToken, PropertyUpgradeMode } from '../types/game';
 import { playSound } from '../utils/sound';
 
 interface LobbyProps {
@@ -15,7 +15,7 @@ interface LobbyProps {
   onRemovePlayer: (playerId: string) => void;
   onStartGame: () => void;
   onLeaveLobby: () => void;
-  onUpdateSettings: (settings: { maxPlayers: number; turnSeconds: number; boardSize?: number; propertyBuildMode?: 'classic' | 'quick'; botDifficulty?: BotDifficulty }) => void;
+  onUpdateSettings: (settings: { maxPlayers: number; turnSeconds: number; boardSize?: number; propertyBuildMode?: 'classic' | 'quick'; propertyUpgradeMode?: PropertyUpgradeMode; botDifficulty?: BotDifficulty }) => void;
 }
 
 export const Lobby: React.FC<LobbyProps> = ({
@@ -40,7 +40,7 @@ export const Lobby: React.FC<LobbyProps> = ({
 
   const [linkCopied, setLinkCopied] = useState(false);
   const isHost = currentPlayer.isHost;
-  const settings = { maxPlayers: MAX_PLAYERS, turnSeconds: 25, boardSize: 40, propertyBuildMode: 'classic' as const, botDifficulty: 'balanced' as BotDifficulty, ...lobby.settings };
+  const settings = { maxPlayers: MAX_PLAYERS, turnSeconds: 25, boardSize: 40, propertyBuildMode: 'classic' as const, propertyUpgradeMode: 'standard' as PropertyUpgradeMode, botDifficulty: 'balanced' as BotDifficulty, ...lobby.settings };
   const inviteLink = `${window.location.origin}/?room=${lobby.roomId}`;
   const handleCopyLink = async () => {
     playSound('click');
@@ -403,6 +403,13 @@ export const Lobby: React.FC<LobbyProps> = ({
                   <option value="quick">Schnellbau – ab 2 Feldern einer Farbe</option>
                 </select>
               </label>
+              <label className="block text-xs font-semibold text-slate-400">Gebäude-Ausbau
+                <select value={settings.propertyUpgradeMode} disabled={!isHost} onChange={e => onUpdateSettings({ ...settings, propertyUpgradeMode: e.target.value as PropertyUpgradeMode })} className="w-full mt-1 bg-slate-950 border border-slate-700 text-white rounded-lg px-3 py-2 text-sm disabled:opacity-60">
+                  <option value="standard">Standard – Häuser und Hotels</option>
+                  <option value="landmark">Wahrzeichen – Hotel weiterentwickeln</option>
+                </select>
+              </label>
+              {settings.propertyUpgradeMode === 'landmark' && <p className="text-[11px] text-slate-500">Vollständiges Farbset ohne Hypothek nötig. Das Wahrzeichen kostet das Dreifache des Hauspreises, erhöht die Hotelmiete um 50 % und bringt beim Verkauf die Hälfte des Ausbaupreises zurück.</p>}
               <label className="block text-xs font-semibold text-slate-400">Bot-Stärke
                 <select value={settings.botDifficulty} disabled={!isHost} onChange={e => onUpdateSettings({ ...settings, botDifficulty: e.target.value as BotDifficulty })} className="w-full mt-1 bg-slate-950 border border-slate-700 text-white rounded-lg px-3 py-2 text-sm disabled:opacity-60">
                   <option value="easy">Einfach – kauft öfter, hält wenig Reserve</option>
@@ -445,6 +452,10 @@ export const Lobby: React.FC<LobbyProps> = ({
               <div className="flex justify-between py-1 border-b border-slate-800/60">
                 <span>Hausbau</span>
                 <span className="font-semibold text-slate-300">{settings.propertyBuildMode === 'quick' ? 'Ab 2 Feldern' : 'Vollset nötig'}</span>
+              </div>
+              <div className="flex justify-between py-1 border-b border-slate-800/60">
+                <span>Gebäude-Ausbau</span>
+                <span className="font-semibold text-slate-300">{settings.propertyUpgradeMode === 'landmark' ? 'Wahrzeichen möglich' : 'Standard'}</span>
               </div>
               <div className="flex justify-between py-1 border-b border-slate-800/60">
                 <span>Startkapital</span>
