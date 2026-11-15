@@ -50,6 +50,35 @@ test('local in-memory server creates a room, starts a bot game, and serves the s
   assert.equal(polled.gameState.phase, started.gameState.phase);
 });
 
+test('city event votes are accepted and returned to other players by local game requests', async () => {
+  const host = await newSession('Event host');
+  const guest = await newSession('Event guest');
+  const created = await (await post('lobby:create', { playerName: host.name }, host.cookie)).json() as { roomId: string };
+  await post('lobby:join', { roomId: created.roomId, playerName: guest.name }, guest.cookie);
+  await post('lobby:ready', { roomId: created.roomId, ready: true }, guest.cookie);
+  const started = await (await post('game:start', { roomId: created.roomId }, host.cookie)).json() as {
+    success: boolean;
+    gameState: { cityEventVote?: { forRound: number; votes: Record<string, string> } };
+  };
+  assert.equal(started.success, true);
+  assert.equal(started.gameState.cityEventVote?.forRound, 2);
+
+  const cast = await (await post('game:city_event_vote', {
+    roomId: created.roomId,
+    eventId: 'building_discount',
+  }, host.cookie)).json() as {
+    success: boolean;
+    gameState: { cityEventVote?: { votes: Record<string, string> } };
+  };
+  assert.equal(cast.success, true);
+  assert.equal(cast.gameState.cityEventVote?.votes[host.playerId], 'building_discount');
+
+  const guestPoll = await (await post('room:poll', { roomId: created.roomId }, guest.cookie)).json() as {
+    gameState: { cityEventVote?: { votes: Record<string, string> } };
+  };
+  assert.equal(guestPoll.gameState.cityEventVote?.votes[host.playerId], 'building_discount');
+});
+
 test('host handoff assigns exactly one ready host when the current host leaves', async () => {
   const host = await newSession('Host');
   const guest = await newSession('Guest');

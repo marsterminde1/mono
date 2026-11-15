@@ -325,6 +325,7 @@ async function runLocalGame(request: Request) {
         'game:buy': () => engine.buyProperty(playerId, data.tileId as number),
         'game:decline': () => engine.declineProperty(playerId),
         'game:auction_bid': () => engine.bidOnAuction(playerId, Number(data.bid)),
+        'game:city_event_vote': () => engine.voteForCityEvent(playerId, data.eventId as Parameters<GameEngine['voteForCityEvent']>[1]),
         'game:pay_jail': () => engine.payJailFine(playerId),
         'game:use_jail_card': () => engine.useJailCard(playerId),
         'game:resolve_card': () => engine.resolveCard(playerId),

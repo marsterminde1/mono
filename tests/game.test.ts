@@ -152,6 +152,90 @@ test('auction leaders cannot spend committed cash and bankruptcy reopens bidding
   assert.equal(engine.getActivePlayer()?.id, 'b');
 });
 
+test('city event votes stay open during play and can be changed until the round ends', () => {
+  const engine = new GameEngine('CITY_EVENTS', [player('human'), player('bot', true)]);
+  const state = engine.getState();
+  assert.equal(state.roundNumber, 1);
+  assert.equal(state.cityEventVote?.forRound, 2);
+  assert.equal(state.cityEventVote?.votes.bot, 'city_dividend');
+
+  assert.equal(engine.voteForCityEvent('human', 'building_discount').success, true);
+  assert.equal(state.phase, 'ROLL');
+  assert.equal(state.cityEventVote?.votes.human, 'building_discount');
+  assert.equal(engine.voteForCityEvent('human', 'city_dividend').success, true);
+  assert.equal(state.cityEventVote?.votes.human, 'city_dividend');
+  state.players[0].bankrupt = true;
+  assert.equal(engine.voteForCityEvent('human', 'city_dividend').success, false);
+});
+
+test('winning city event applies at the round boundary and opens the next vote', () => {
+  const engine = new GameEngine('CITY_EVENT_DIVIDEND', [player('a'), player('b'), player('c')]);
+  const state = engine.getState();
+  state.players.forEach(candidate => { candidate.money = 1000; });
+  for (const candidate of state.players) engine.voteForCityEvent(candidate.id, 'city_dividend');
+  state.activePlayerIndex = 2;
+  state.phase = 'END_TURN';
+
+  assert.equal(engine.endTurn('c').success, true);
+  assert.equal(state.roundNumber, 2);
+  assert.equal(state.activePlayerIndex, 0);
+  assert.deepEqual(state.players.map(candidate => candidate.money), [1025, 1025, 1025]);
+  assert.equal(state.activeCityEvent?.id, 'city_dividend');
+  assert.equal(state.activeCityEvent?.round, 2);
+  assert.equal(state.cityEventVote?.forRound, 3);
+});
+
+test('bankrupt round starters are skipped without triggering a premature event', () => {
+  const engine = new GameEngine('CITY_EVENT_BANKRUPTCY', [player('a'), player('b'), player('c')]);
+  const state = engine.getState();
+  assert.equal(engine.declareBankruptcy('a').success, true);
+  assert.equal(state.roundNumber, 1);
+  assert.equal(state.roundStartPlayerId, 'b');
+  engine.voteForCityEvent('b', 'building_discount');
+  engine.voteForCityEvent('c', 'building_discount');
+  state.activePlayerIndex = 2;
+  state.phase = 'END_TURN';
+
+  assert.equal(engine.endTurn('c').success, true);
+  assert.equal(state.roundNumber, 2);
+  assert.equal(state.roundStartPlayerId, 'b');
+  assert.equal(state.activePlayerIndex, 1);
+  assert.equal(state.cityEventBuildDiscounts?.b, 1);
+  assert.equal(state.cityEventBuildDiscounts?.c, 1);
+});
+
+test('building subsidy discounts only the first house built in that round', () => {
+  const engine = new GameEngine('CITY_EVENT_BUILD', [player('a'), player('b'), player('c')]);
+  const state = engine.getState();
+  for (const candidate of state.players) engine.voteForCityEvent(candidate.id, 'building_discount');
+  state.activePlayerIndex = 2;
+  state.phase = 'END_TURN';
+  assert.equal(engine.endTurn('c').success, true);
+
+  const group = propertyGroup(getBoardTiles(40)[1].color!, 1);
+  for (const tileId of group) state.properties[tileId].ownerId = 'a';
+  state.players[0].money = 1000;
+  const houseCost = getBoardTiles(40)[group[0]].houseCost!;
+  assert.equal(engine.buildHouse('a', group[0]).success, true);
+  assert.equal(state.players[0].money, 1000 - houseCost + 25);
+  assert.equal(state.cityEventBuildDiscounts?.a, 0);
+  assert.equal(engine.buildHouse('a', group[1]).success, true);
+  assert.equal(state.players[0].money, 1000 - houseCost * 2 + 25);
+});
+
+test('legacy snapshots receive a safe city event vote state', () => {
+  const snapshot = game().snapshot();
+  delete snapshot.state.roundNumber;
+  delete snapshot.state.roundStartPlayerId;
+  delete snapshot.state.cityEventVote;
+  delete snapshot.state.activeCityEvent;
+  delete snapshot.state.cityEventBuildDiscounts;
+  const restored = GameEngine.restore(snapshot);
+  assert.equal(restored.getState().roundNumber, 1);
+  assert.equal(restored.getState().roundStartPlayerId, 'a');
+  assert.equal(restored.getState().cityEventVote?.forRound, 2);
+});
+
 test('negative trades and changed ownership cannot transfer cash or assets', () => {
   const engine = game();
   const offer = { fromPlayerId: 'a', toPlayerId: 'b', offeredMoney: -100, requestedMoney: 0, offeredProperties: [1], requestedProperties: [] };

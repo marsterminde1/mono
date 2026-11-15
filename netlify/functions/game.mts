@@ -264,6 +264,7 @@ export default async (req: Request) => {
           'game:buy': () => engine!.buyProperty(playerId, data.tileId),
           'game:decline': () => engine!.declineProperty(playerId),
           'game:auction_bid': () => engine!.bidOnAuction(playerId, Number(data.bid)),
+          'game:city_event_vote': () => engine!.voteForCityEvent(playerId, data.eventId),
           'game:pay_jail': () => engine!.payJailFine(playerId),
           'game:use_jail_card': () => engine!.useJailCard(playerId),
           'game:resolve_card': () => engine!.resolveCard(playerId),

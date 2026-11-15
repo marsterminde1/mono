@@ -127,6 +127,18 @@ export interface PropertyAuction {
   passedBotIds: string[];
 }
 
+export type CityEventId = 'city_dividend' | 'building_discount';
+
+export interface CityEventVote {
+  forRound: number;
+  votes: Record<string, CityEventId>;
+}
+
+export interface ActiveCityEvent {
+  id: CityEventId;
+  round: number;
+}
+
 export interface GameLogEntry {
   playerId?: string;
   participantIds?: string[];
@@ -162,6 +174,11 @@ export interface GameState {
   activeTrade: TradeOffer | null;
   pendingTrades?: TradeOffer[];
   auction?: PropertyAuction | null;
+  roundNumber?: number;
+  roundStartPlayerId?: string | null;
+  cityEventVote?: CityEventVote | null;
+  activeCityEvent?: ActiveCityEvent | null;
+  cityEventBuildDiscounts?: Record<string, number>;
   logs: GameLogEntry[];
   winnerId?: string;
   lastActionPrompt?: string;

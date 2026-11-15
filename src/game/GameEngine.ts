@@ -1,9 +1,11 @@
 import { boardRules, getBoardTiles, propertyGroup } from '../data/boardVariants';
 import { CHANCE_CARDS, COMMUNITY_CARDS } from '../data/monopolyBoard';
 import {
+  ActiveCityEvent,
   BoardTile,
   BotDifficulty,
   Card,
+  CityEventId,
   GameLogEntry,
   GamePhase,
   GameState,
@@ -15,6 +17,7 @@ import {
 
 import { playerReferences } from '../utils/playerReferences';
 import type { PropertyBuildMode } from '../types/game';
+import { CITY_EVENTS } from '../data/cityEvents';
 
 export const MAX_GAME_LOGS = 200;
 
@@ -71,10 +74,16 @@ export class GameEngine {
       activeTrade: null,
       logs: [],
       auction: null,
+      roundNumber: 1,
+      roundStartPlayerId: players[0]?.id ?? null,
+      cityEventVote: null,
+      activeCityEvent: null,
+      cityEventBuildDiscounts: {},
       freeParkingPot: 100,
       turnSeconds: options.turnSeconds ?? 25,
     };
 
+    this.state.cityEventVote = this.createCityEventVote(2);
     this.syncTurnClock();
     this.addLog(`Spiel gestartet: ${rules.boardSize} Felder, $${rules.startingCash} Startgeld, ${rules.rollsPerTurn} Würfe pro Zug.`, 'system');
   }
@@ -89,7 +98,18 @@ export class GameEngine {
 
   public static restore(snapshot: ReturnType<GameEngine['snapshot']>): GameEngine {
     const engine = new GameEngine(snapshot.state.roomId, []);
-    engine.state = { ...snapshot.state, logs: trimGameLogs(snapshot.state.logs) };
+    engine.state = {
+      ...snapshot.state,
+      logs: trimGameLogs(snapshot.state.logs),
+      roundNumber: snapshot.state.roundNumber ?? 1,
+      roundStartPlayerId: snapshot.state.roundStartPlayerId ?? snapshot.state.players[snapshot.state.activePlayerIndex]?.id ?? null,
+      cityEventVote: snapshot.state.cityEventVote ?? null,
+      activeCityEvent: snapshot.state.activeCityEvent ?? null,
+      cityEventBuildDiscounts: snapshot.state.cityEventBuildDiscounts ?? {},
+    };
+    if (!engine.state.cityEventVote && engine.state.phase !== 'GAME_OVER') {
+      engine.state.cityEventVote = engine.createCityEventVote((engine.state.roundNumber ?? 1) + 1);
+    }
     engine.chanceDeck = snapshot.chanceDeck;
     engine.communityDeck = snapshot.communityDeck;
     return engine;
@@ -101,6 +121,29 @@ export class GameEngine {
 
   public getActivePlayer(): Player | undefined {
     return this.state.players[this.state.activePlayerIndex];
+  }
+
+  private createCityEventVote(forRound: number) {
+    const votes: Record<string, CityEventId> = {};
+    for (const player of this.state.players) {
+      if (!player.isBot || player.bankrupt) continue;
+      const canBuild = this.tiles.some(tile => tile.type === 'street' && tile.color
+        && this.canBuildOnGroup(player.id, tile.color, tile.id)
+        && (this.state.properties[tile.id]?.houses ?? 0) < 5
+        && player.money >= (tile.houseCost || 100));
+      votes[player.id] = canBuild ? 'building_discount' : 'city_dividend';
+    }
+    return { forRound, votes };
+  }
+
+  public voteForCityEvent(playerId: string, eventId: CityEventId): { success: boolean; message?: string } {
+    const vote = this.state.cityEventVote;
+    const player = this.state.players.find(candidate => candidate.id === playerId);
+    if (this.state.phase === 'GAME_OVER' || !vote) return { success: false, message: 'There is no city event vote open' };
+    if (!player || player.bankrupt) return { success: false, message: 'Player cannot vote' };
+    if (!CITY_EVENTS.some(event => event.id === eventId)) return { success: false, message: 'Unknown city event' };
+    vote.votes[playerId] = eventId;
+    return { success: true };
   }
 
   private shuffle<T>(array: T[]): T[] {
@@ -766,12 +809,14 @@ export class GameEngine {
       return { success: false, message: 'You must build evenly across the color group' };
     }
 
-    const cost = tile.houseCost || 100;
+    const hasEventDiscount = (this.state.cityEventBuildDiscounts?.[playerId] ?? 0) > 0;
+    const cost = Math.max(0, (tile.houseCost || 100) - (hasEventDiscount ? 25 : 0));
     if (this.availableCash(player) < cost) {
       return { success: false, message: 'Insufficient funds' };
     }
 
     player.money -= cost;
+    if (hasEventDiscount) this.state.cityEventBuildDiscounts![playerId]--;
     prop.houses++;
     const typeLabel = prop.houses === 5 ? 'a Hotel' : `House #${prop.houses}`;
     this.addLog(`${player.name} built ${typeLabel} on ${tile.name} for $${cost}!`, 'purchase', player);
@@ -1058,6 +1103,49 @@ export class GameEngine {
     this.state.activePlayerIndex = nextIdx;
     const nextPlayer = this.state.players[nextIdx];
     this.addLog(`It is now ${nextPlayer.name}'s turn.`, 'system', nextPlayer);
+    const roundStartPlayer = this.state.players.find(player => player.id === this.state.roundStartPlayerId);
+    if (!roundStartPlayer || roundStartPlayer.bankrupt) {
+      this.state.roundStartPlayerId = nextPlayer.id;
+    } else if (nextPlayer.id === roundStartPlayer.id) {
+      this.resolveCityEventRound(nextPlayer);
+    }
+  }
+
+  private resolveCityEventRound(nextPlayer: Player) {
+    const nextRound = (this.state.roundNumber ?? 1) + 1;
+    const counts = new Map<CityEventId, number>(CITY_EVENTS.map(event => [event.id, 0]));
+    for (const [playerId, eventId] of Object.entries(this.state.cityEventVote?.votes ?? {})) {
+      const voter = this.state.players.find(player => player.id === playerId);
+      const event = CITY_EVENTS.find(candidate => candidate.id === eventId);
+      if (voter && !voter.bankrupt && event) counts.set(event.id, (counts.get(event.id) ?? 0) + 1);
+    }
+
+    let selectedEvent = CITY_EVENTS[0];
+    let highestVotes = -1;
+    for (const event of CITY_EVENTS) {
+      const votes = counts.get(event.id) ?? 0;
+      if (votes > highestVotes) {
+        selectedEvent = event;
+        highestVotes = votes;
+      }
+    }
+
+    const activeEvent: ActiveCityEvent = { id: selectedEvent.id, round: nextRound };
+    this.state.roundNumber = nextRound;
+    this.state.roundStartPlayerId = nextPlayer.id;
+    this.state.activeCityEvent = activeEvent;
+    this.state.cityEventBuildDiscounts = {};
+    if (activeEvent.id === 'city_dividend') {
+      for (const player of this.state.players) {
+        if (!player.bankrupt) player.money += 25;
+      }
+    } else {
+      for (const player of this.state.players) {
+        if (!player.bankrupt) this.state.cityEventBuildDiscounts[player.id] = 1;
+      }
+    }
+    this.addLog(`${selectedEvent.title} gilt in Runde ${nextRound}: ${selectedEvent.description}`, 'system');
+    this.state.cityEventVote = this.createCityEventVote(nextRound + 1);
   }
 
   // Bankruptcy

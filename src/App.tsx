@@ -15,12 +15,13 @@ import { ArenaIntro } from './components/ArenaIntro';
 import { PlayerScoreboard, ActionBar } from './components/PlayerHUD';
 import { PropertyPurchase } from './components/PropertyPurchase';
 import { PropertyAuction } from './components/PropertyAuction';
+import { CityEventPanel } from './components/CityEventPanel';
 import { PropertyModal } from './components/PropertyModal';
 import { TradeModal } from './components/TradeModal';
 import { CardModal } from './components/CardModal';
 import { GameLog } from './components/GameLog';
 import { AVAILABLE_TOKENS, PLAYER_COLORS } from './data/monopolyBoard';
-import { BoardTile, GameState, LobbyRoom, Player, PlayerToken } from './types/game';
+import { BoardTile, CityEventId, GameState, LobbyRoom, Player, PlayerToken } from './types/game';
 import { playSound, toggleSound, isSoundMuted } from './utils/sound';
 import { LeaderboardModal } from './components/LeaderboardModal';
 
@@ -429,6 +430,13 @@ export default function App() {
     }));
   };
 
+  const handleCityEventVote = (eventId: CityEventId) => {
+    if (!socket || !gameState) return;
+    socket.emit('game:city_event_vote', { roomId: gameState.roomId, eventId }, (result: any) => {
+      if (!result?.success) notify(result?.error || 'Deine Stimme konnte nicht gespeichert werden.', 'error');
+    });
+  };
+
   const handlePayJailFine = () => {
     if (!socket || !gameState) return;
     socket.emit('game:pay_jail', { roomId: gameState.roomId });
@@ -814,6 +822,7 @@ export default function App() {
           <main className="game-main" inert={showPurchase || showAuction || isTradeModalOpen}>
             {/* Center / Board Stage */}
             <section className="game-stage">
+              <CityEventPanel gameState={gameState} currentPlayer={currentPlayer} onVote={handleCityEventVote} />
               {/* Maximized Board Container (3D or 2D) */}
               <div className="game-board-region">
                 {boardMode === 'Stadt' ? <DioramaBoard gameState={gameState} onTileClick={tile => { setInspectedTile(tile); setIsPropertyModalOpen(true); }} /> : (gameState.boardSize ?? 40) > 40 ? (<ExpandedBoard gameState={gameState} perspective={boardMode === '3D'} onTileClick={tile => { setInspectedTile(tile); setIsPropertyModalOpen(true); }} />) : boardMode === '3D' ? (
